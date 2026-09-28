@@ -1,7 +1,7 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-    Downloads the native binaries OurCut needs (ffmpeg, ffprobe, libmpv) into deps/<rid>/.
+    Downloads the native binaries HighlightCut needs (ffmpeg, ffprobe, libmpv) into deps/<rid>/.
 
 .DESCRIPTION
     Versions, download URLs and SHA-256 hashes are pinned in scripts/deps.json. Every download and
@@ -65,12 +65,12 @@ $RepoRoot = Split-Path -Parent $PSScriptRoot
 $Manifest = Get-Content -Raw -LiteralPath (Join-Path $PSScriptRoot 'deps.json') | ConvertFrom-Json
 if (-not $Destination) { $Destination = Join-Path (Join-Path $RepoRoot 'deps') $Rid }
 if (-not $CacheDir) {
-    if ($env:OURCUT_DEPS_CACHE) { $CacheDir = $env:OURCUT_DEPS_CACHE }
+    if ($env:HIGHLIGHTCUT_DEPS_CACHE) { $CacheDir = $env:HIGHLIGHTCUT_DEPS_CACHE }
     else { $CacheDir = Join-Path (Join-Path $RepoRoot 'deps') '.cache' }
 }
 $ToolsDir = Join-Path (Join-Path $RepoRoot 'deps') '.tools'
-$StampPath = Join-Path $Destination '.ourcut-deps.json'
-$UserAgent = 'OurCut-fetch-deps/1'   # SourceForge serves an HTML page to browser-like agents.
+$StampPath = Join-Path $Destination '.highlightcut-deps.json'
+$UserAgent = 'HighlightCut-fetch-deps/1'   # SourceForge serves an HTML page to browser-like agents.
 
 $RidEntry = $Manifest.rids.$Rid
 if (-not $RidEntry) { throw "No pinned dependencies for RID '$Rid' in deps.json." }

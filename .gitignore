@@ -56,7 +56,7 @@ CodeCoverage/
 TestResult.xml
 nunit-*.xml
 
-# OurCut native dependencies (downloaded by scripts/fetch-deps.ps1)
+# HighlightCut native dependencies (downloaded by scripts/fetch-deps.ps1)
 /deps/
 
 # Test output

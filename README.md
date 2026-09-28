@@ -1,6 +1,6 @@
-# OurCut
+# HighlightCut
 
-OurCut is an open-source desktop video editor for cutting long recordings down to the parts worth keeping.
+HighlightCut is an open-source desktop video editor for cutting long recordings down to the parts worth keeping.
 You mark segments on a timeline of the whole source file, arrange them, and export them as one merged file
 or as separate files. Cuts are lossless by default (stream copy, no re-encoding); re-encoding is optional.
 
@@ -24,7 +24,7 @@ editor as they happen, each one undoable.
 - Claude panel: every edit as a card with its own undo, which reverts just that edit.
 - Export: lossless copy (cut points on keyframes) or re-encode; merge into one file or separate files;
   progress and cancel.
-- Projects saved as `.ourcut.json`. Undo/redo for every edit.
+- Projects saved as `.highlightcut.json`. Undo/redo for every edit.
 
 ## Phase 2
 
@@ -53,18 +53,18 @@ Not yet: smart cut. The UI already has a place for it.
 
 ## Connecting Claude
 
-OurCut is an MCP server: `OurCut.exe mcp` speaks MCP over stdio and forwards Claude's tool calls to the editor,
-starting OurCut when Claude first uses it. **Settings → MCP server** shows whether Claude is connected, turns the
+HighlightCut is an MCP server: `HighlightCut.exe mcp` speaks MCP over stdio and forwards Claude's tool calls to the editor,
+starting HighlightCut when Claude first uses it. **Settings → MCP server** shows whether Claude is connected, turns the
 server off ("Let Claude connect"), and shows the exact command for your install with Copy buttons:
 
-- **Claude Code**: `claude mcp add --scope user ourcut -- "C:\path\to\OurCut.exe" mcp`
+- **Claude Code**: `claude mcp add --scope user highlightcut -- "C:\path\to\HighlightCut.exe" mcp`
 - **Claude Desktop**: add this to `%APPDATA%\Claude\claude_desktop_config.json` (Settings → Developer → Edit Config)
   and restart Claude Desktop:
 
   ```json
   {
     "mcpServers": {
-      "ourcut": { "command": "C:\\path\\to\\OurCut.exe", "args": ["mcp"] }
+      "highlightcut": { "command": "C:\\path\\to\\HighlightCut.exe", "args": ["mcp"] }
     }
   }
   ```
@@ -72,9 +72,9 @@ server off ("Let Claude connect"), and shows the exact command for your install 
 Settings → MCP server also has what Claude may do without asking (open files, save the project, export). They are
 saved, but not enforced yet: Claude's exports start right away.
 
-Then ask Claude something like "open my latest recording in OurCut, cut out the pauses and the ums, split it
+Then ask Claude something like "open my latest recording in HighlightCut, cut out the pauses and the ums, split it
 into chapters where I change topic, and export it". Claude does not see the video itself: it works from the
-transcript, silences, scene changes and keyframes OurCut finds. The badge in the title bar shows the connection
+transcript, silences, scene changes and keyframes HighlightCut finds. The badge in the title bar shows the connection
 (MCP · Waiting for Claude / Claude connected / Claude editing / In another window / Off), and every edit Claude makes appears in the Claude
 panel with its own Undo. Only your own user account can connect to the editor.
 
@@ -104,12 +104,17 @@ above for now.
 ## Download
 
 Every CI run builds a ready-to-run Windows folder: open the latest run under
-[Actions](https://github.com/skyp1nus/OurCut/actions), download **OurCut-win-x64**, unzip it and start
-`OurCut.exe`. It includes .NET, ffmpeg, ffprobe and libmpv, so nothing else needs installing. Tagged versions
+[Actions](https://github.com/skyp1nus/OurCut/actions), download **HighlightCut-win-x64**, unzip it and start
+`HighlightCut.exe`. It includes .NET, ffmpeg, ffprobe and libmpv, so nothing else needs installing. Tagged versions
 (`v*`) are published under [Releases](https://github.com/skyp1nus/OurCut/releases).
 
-If something goes wrong, the details are in `%LOCALAPPDATA%\OurCut\logs`. Settings, the recent files list and
-the preview cache are in `%LOCALAPPDATA%\OurCut`.
+If something goes wrong, the details are in `%LOCALAPPDATA%\HighlightCut\logs`. Settings, the recent files list and
+the preview cache are in `%LOCALAPPDATA%\HighlightCut`.
+
+HighlightCut used to be called OurCut. The first start after the rename moves `%LOCALAPPDATA%\OurCut` (settings,
+recent files, models, cache and logs) to `%LOCALAPPDATA%\HighlightCut`, and `.ourcut.json` projects still open. Claude
+knows the app by its old name until you add it again: run `claude mcp remove --scope user ourcut` and then the new
+command from Settings → MCP server, and replace the `ourcut` entry in Claude Desktop's config.
 
 ## Building
 
@@ -120,34 +125,34 @@ that ships with Windows, or PowerShell 7).
 git clone https://github.com/skyp1nus/OurCut.git
 cd OurCut
 powershell -ExecutionPolicy Bypass -File scripts\fetch-deps.ps1   # or: pwsh scripts/fetch-deps.ps1
-dotnet run --project src/OurCut.App
+dotnet run --project src/HighlightCut.App
 ```
 
 `fetch-deps.ps1` downloads ffmpeg, ffprobe and libmpv into `deps/win-x64/`. They are not stored in the
-repository. The build copies them next to `OurCut.exe`. Versions, URLs and SHA-256 hashes are pinned in
+repository. The build copies them next to `HighlightCut.exe`. Versions, URLs and SHA-256 hashes are pinned in
 [`scripts/deps.json`](scripts/deps.json), and the script refuses anything that does not match.
 Useful options: `-Check` (verify only, no downloads), `-Force` (reinstall), `-Component ffmpeg`,
 `-Proxy http://proxy:8080`. Downloads are cached in `deps/.cache`.
 
 A self-contained build like the one CI publishes:
-`dotnet publish src/OurCut.App -c Release -r win-x64 --self-contained -p:PublishReadyToRun=true -o out/OurCut`.
+`dotnet publish src/HighlightCut.App -c Release -r win-x64 --self-contained -p:PublishReadyToRun=true -o out/HighlightCut`.
 
-`dotnet run --project src/OurCut.App -- path/to/video.mp4` opens a video (or an `.ourcut.json` project) at start.
+`dotnet run --project src/HighlightCut.App -- path/to/video.mp4` opens a video (or a `.highlightcut.json` project) at start.
 
 To see the UI with the sample project from the design, start it in demo mode:
-`dotnet run --project src/OurCut.App -- --demo editing`. The other screens: `empty`, `ai`, `export`, `exporting`,
+`dotnet run --project src/HighlightCut.App -- --demo editing`. The other screens: `empty`, `ai`, `export`, `exporting`,
 `transcript`, `transcribing`, `no-model`, `claude-request`, `claude-exporting`, `claude-export-failed`, and the
 settings sections `settings` (Transcription), `settings-general`, `settings-playback`, `settings-export`,
 `settings-keyboard`, `settings-keyboard-recording`, `settings-keyboard-conflict` and `settings-mcp`. Names are
 not case-sensitive and the dashes are optional (`--demo ClaudeExportFailed` works too).
 
-Run the tests with `dotnet test OurCut.slnx`. The UI tests render the app headlessly and write screenshots to
+Run the tests with `dotnet test HighlightCut.slnx`. The UI tests render the app headlessly and write screenshots to
 `artifacts/screenshots/`, one per demo screen under the same name (`claude-export-failed.png`) and a few more states. Tests that run ffmpeg generate their own small videos; they are skipped when ffmpeg
-is not found (in `deps/`, `OURCUT_FFMPEG_DIR` or `PATH`). Playback tests also need libmpv (in `deps/`,
-`OURCUT_MPV_DIR` or the system; on Ubuntu `apt install libmpv2`).
+is not found (in `deps/`, `HIGHLIGHTCUT_FFMPEG_DIR` or `PATH`). Playback tests also need libmpv (in `deps/`,
+`HIGHLIGHTCUT_MPV_DIR` or the system; on Ubuntu `apt install libmpv2`).
 
 Without libmpv the editor still works; playback is then simulated over the thumbnails. Video is drawn with
-OpenGL when available and with mpv's software renderer otherwise; `OURCUT_VIDEO=software` forces the latter.
+OpenGL when available and with mpv's software renderer otherwise; `HIGHLIGHTCUT_VIDEO=software` forces the latter.
 
 Avalonia's build tooling sends anonymous build telemetry. Set `AVALONIA_TELEMETRY_OPTOUT=1` to turn it off
 (CI does this).
@@ -155,25 +160,25 @@ Avalonia's build tooling sends anonymous build telemetry. Set `AVALONIA_TELEMETR
 ## Project layout
 
 ```
-src/OurCut.App      Avalonia UI: views and view models (CommunityToolkit.Mvvm)
-src/OurCut.Core     Project model, timeline and edit commands with undo/redo. No UI references.
-src/OurCut.Mcp      MCP server (the editor tools) and the stdio bridge Claude starts. No UI references.
-src/OurCut.Media    libmpv playback; ffprobe/ffmpeg: probing, keyframes, export (FFMpegCore), thumbnails,
+src/HighlightCut.App      Avalonia UI: views and view models (CommunityToolkit.Mvvm)
+src/HighlightCut.Core     Project model, timeline and edit commands with undo/redo. No UI references.
+src/HighlightCut.Mcp      MCP server (the editor tools) and the stdio bridge Claude starts. No UI references.
+src/HighlightCut.Media    libmpv playback; ffprobe/ffmpeg: probing, keyframes, export (FFMpegCore), thumbnails,
                     waveforms, cache (SkiaSharp)
-src/OurCut.Transcription  Speech-to-text models (download, install) and engines. No UI references.
+src/HighlightCut.Transcription  Speech-to-text models (download, install) and engines. No UI references.
 tests/              xUnit tests for Core, Media, Mcp, Transcription and headless UI tests for App
 scripts/            fetch-deps.ps1 and the pinned dependency manifest
 design/             The Claude Design export the UI is built from
 ```
 
 See [docs/architecture.md](docs/architecture.md) for how the layers fit together, the list of edit commands
-and the `.ourcut.json` format.
+and the `.highlightcut.json` format.
 
 ## License
 
-OurCut is free software: you can redistribute it and/or modify it under the terms of the GNU General Public
+HighlightCut is free software: you can redistribute it and/or modify it under the terms of the GNU General Public
 License as published by the Free Software Foundation, either version 3 of the License, or (at your option) any
 later version. See [LICENSE](LICENSE).
 
-OurCut uses FFmpeg and mpv, which are downloaded separately and are also GPL-licensed. See
+HighlightCut uses FFmpeg and mpv, which are downloaded separately and are also GPL-licensed. See
 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) for all third-party components and their licenses.

@@ -1,30 +1,30 @@
 # Architecture
 
-OurCut has four parts. Only the App knows about Avalonia; Core has no dependencies at all, so the same
+HighlightCut has four parts. Only the App knows about Avalonia; Core has no dependencies at all, so the same
 editing operations are driven by the UI and by Claude through the MCP server.
 
 ```
-OurCut.App    Avalonia views and view models ──┐
-OurCut.Media  libmpv, ffprobe/ffmpeg, previews ─┼──> OurCut.Core   project model, commands, undo/redo, .ourcut.json
-OurCut.Mcp    MCP tools, pipe server, bridge ───┘
+HighlightCut.App    Avalonia views and view models ──┐
+HighlightCut.Media  libmpv, ffprobe/ffmpeg, previews ─┼──> HighlightCut.Core   project model, commands, undo/redo, .highlightcut.json
+HighlightCut.Mcp    MCP tools, pipe server, bridge ───┘
 ```
 
 ## Core
 
-- **Model** (`OurCut.Core.Model`): immutable records. A `Project` has one `SourceMedia` (path, duration,
+- **Model** (`HighlightCut.Core.Model`): immutable records. A `Project` has one `SourceMedia` (path, duration,
   frame rate, audio tracks) and an ordered list of `Clip`s. List order is output order. Times are
   seconds on the source timeline. Excluded clips (`IsIncluded = false`) stay in the project but are not exported.
   `Project.AudioMix` holds a `TrackMix` (volume in dB, muted) for each audio track that is not at the default
   (0 dB, unmuted), keyed by stream index. The volume runs from −40 dB, which means silent (−∞), to +12 dB.
 - **Clip names and colours**: every clip has a name of its own and a colour (see below).
-- **Commands** (`OurCut.Core.Editing`): every change is an `IEditCommand` that turns one `Project` into the
+- **Commands** (`HighlightCut.Core.Editing`): every change is an `IEditCommand` that turns one `Project` into the
   next, or throws `EditException` with a readable reason. Commands never clamp or guess; callers do that.
 - **Session**: `EditorSession` holds the current project and a linear `History`. `Execute` applies a command
   and records it with its origin (`User` or `Assistant`). Edits sharing a merge key (one drag) become one
   undo step. `Changed` fires after every edit, undo, redo and load. `SetTrackMix` changes a track's volume or mute
   (`ProjectChangeKind.Mixed`). That is a mixer setting, not an edit: it is saved with the project but not recorded
   in the history, and undo and redo keep the current mix (as mute always behaved).
-- **Files**: `ProjectFile` reads and writes `.ourcut.json` (see below).
+- **Files**: `ProjectFile` reads and writes `.highlightcut.json` (see below).
 
 The session is not thread-safe. The MCP server runs every tool call on the UI thread (see below).
 
@@ -84,7 +84,7 @@ single right answer, so the command refuses with an `EditException` and the UI s
 
 ## Media
 
-`OurCut.Media` runs ffprobe and ffmpeg as separate processes, always off the UI thread. Paths go through
+`HighlightCut.Media` runs ffprobe and ffmpeg as separate processes, always off the UI thread. Paths go through
 `ProcessStartInfo.ArgumentList` (or FFMpegCore's quoting), never through a shell.
 
 - **Probing** (`MediaProbe`): `ffprobe -show_format -show_streams` as JSON → `MediaInfo`: container family,
@@ -94,7 +94,7 @@ single right answer, so the command refuses with an `EditException` and the UI s
   keyframes in the index, so ffmpeg's demuxer skips the other samples (`-discard nokey`, copied into `framecrc`) and
   only a few percent of the file is read; with B-frames ffmpeg 6.x's MOV demuxer gets the times of skipped samples
   wrong, so those files, like every other container, are read through with ffprobe. Times are relative to the
-  file's start time, like everything else in OurCut.
+  file's start time, like everything else in HighlightCut.
 - **Previews**: `WaveformExtractor` decodes every audio stream to 8 kHz mono and keeps one peak per 10 ms
   (`WaveformData`, drawn on a dB scale). Audio decodes on one core per ffmpeg, so a long file is split into
   stretches of at least 30 s (up to one per core, at most 8), decoded at once and filling in side by side; the timeline
@@ -105,7 +105,7 @@ single right answer, so the command refuses with an `EditException` and the UI s
   which falls back to the CPU by itself), and every analysis process (`ToolProcess`) runs below normal priority so
   playback and the UI keep the CPU they need.
 - **Cache** (`MediaCache`): keyframes, waveform and a JPEG thumbnail atlas per file in
-  `%LOCALAPPDATA%\OurCut\cache`, keyed by path, size and modification time.
+  `%LOCALAPPDATA%\HighlightCut\cache`, keyed by path, size and modification time.
 - **Export**: `ExportPlanner` turns the project and `ExportSettings` into an `ExportPlan` (every step, output
   and temporary file decided up front, so it can be tested and shown); `FfmpegCommands` builds each step's
   ffmpeg command with FFMpegCore; `ExportRunner` runs the steps with progress and cancellation.
@@ -128,7 +128,7 @@ in memory, only not drawn. With the chip off the video track is a plain strip of
 scene markers on it as before, and without thumbnails the player shows black until mpv's first frame.
 
 While that runs for more than 0.4 s, a processing screen covers the editor below the title bar (`ProcessingOverlay`,
-design "OurCut — екран обробки", X1): a slowly changing blob (`BlobView`, drawn every frame while shown), the file,
+design "HighlightCut — екран обробки", X1): a slowly changing blob (`BlobView`, drawn every frame while shown), the file,
 a progress line and "Reading the audio · 72% · about 8 s left". The part named is the one furthest behind
 (`MediaPreview.AnalysisStage`); the time left comes from the rate of the last few seconds, smoothed so it counts down
 (`TimeLeftEstimator`). It fades and settles in, and fades out growing a little into the editor; a file read from the
@@ -136,7 +136,7 @@ cache never shows it.
 
 ### Lossless cuts
 
-With `-ss` before `-i` and `-c copy`, ffmpeg starts every stream at a keyframe. OurCut makes that explicit:
+With `-ss` before `-i` and `-c copy`, ffmpeg starts every stream at a keyframe. HighlightCut makes that explicit:
 `CutPlanner` moves each clip's in-point back to the keyframe at or before it (nothing is lost; a short lead-in
 is added) and computes the `-ss` value that makes ffmpeg land exactly on that keyframe. MP4/MOV seek by
 presentation time, so a value just after the keyframe works. Matroska and most other demuxers seek
@@ -164,7 +164,7 @@ Output names come from Settings → Export's file name pattern (`ExportSettings.
 `{project}-cut`. A name that is taken gets " (2)"; with `ExportSettings.Overwrite` the output is written under a
 temporary name and moved over the old file once complete (`ExportPlan.Replacements`), so a failed or cancelled
 export leaves the old file as it was. Outputs never share a name, and an export never writes over its source.
-Temporary files (`.ourcut-tmp-*`) and any half-written output are removed on failure or cancel.
+Temporary files (`.highlightcut-tmp-*`) and any half-written output are removed on failure or cancel.
 
 Audio tracks are written as separate streams, never mixed, so a track's volume applies to its own stream
 (`ExportSettings.AudioGainsDb`, by stream index; `FfmpegCommands.AudioGains` maps it to the output's audio positions).
@@ -183,7 +183,7 @@ written. Claude's exports always add a number. "After export: Show in folder" re
 
 ## Playback
 
-`OurCut.Media.Playback` talks to libmpv directly (`LibraryImport`, client API 2.x; `libmpv-2.dll` from
+`HighlightCut.Media.Playback` talks to libmpv directly (`LibraryImport`, client API 2.x; `libmpv-2.dll` from
 `fetch-deps.ps1`, `libmpv.so.2` on Linux).
 
 - **`MpvPlayer`** owns one mpv core. Everything that controls playback (load, play, pause, seek, frame step,
@@ -202,7 +202,7 @@ written. Claude's exports always add a number. "After export: Show in folder" re
   changes (a short gap in the sound), so `SetAudioTracks` sends nothing when the mix is unchanged, and the editor
   applies a volume slider's changes at most every 250 ms (`EditorViewModel.VolumeApplyDelay`); mute applies at once.
   Muting leaves a lane out of the preview; an export leaves it out only with "Only unmuted lanes".
-- **Video** goes through the render API into OurCut's own view: `MpvOpenGlRenderer` draws into Avalonia's OpenGL
+- **Video** goes through the render API into HighlightCut's own view: `MpvOpenGlRenderer` draws into Avalonia's OpenGL
   framebuffer; `MpvSoftwareRenderer` renders BGRX frames into memory on a background thread. `vo=libmpv` without
   a render context fails the whole file, so the player uses `vo=null` until a renderer is attached and reopens
   the file where it was when one attaches or detaches. A renderer detaches before it frees its context (freeing it
@@ -226,7 +226,7 @@ sample, playback is simulated over the thumbnails.
 
 ## Silence and scene detection
 
-Both live in `OurCut.Media.Analysis` and keep their raw measurements, so a different sensitivity is instant.
+Both live in `HighlightCut.Media.Analysis` and keep their raw measurements, so a different sensitivity is instant.
 
 - **Silences** (`SilenceDetector`) come from the waveform the timeline already has: 10 ms peak buckets per audio
   track, like ffmpeg's `silencedetect` but without decoding the audio again. A stretch counts as silent when every
@@ -249,21 +249,21 @@ Both live in `OurCut.Media.Analysis` and keep their raw measurements, so a diffe
 
 ## MCP server
 
-Claude edits the open project through MCP tools (`OurCut.Mcp.EditorTools`). There are two processes:
+Claude edits the open project through MCP tools (`HighlightCut.Mcp.EditorTools`). There are two processes:
 
 ```
-Claude ──stdio──> OurCut.exe mcp (McpBridge) ──named pipe──> OurCut editor (McpPipeServer → EditorMcpHost → UI thread)
+Claude ──stdio──> HighlightCut.exe mcp (McpBridge) ──named pipe──> HighlightCut editor (McpPipeServer → EditorMcpHost → UI thread)
 ```
 
-- **The bridge** is what Claude starts (`OurCut.exe mcp`; `Program.Main` never starts Avalonia in this mode). It
+- **The bridge** is what Claude starts (`HighlightCut.exe mcp`; `Program.Main` never starts Avalonia in this mode). It
   lists the tools itself, from the same `EditorTools` definitions, so Claude Desktop can start its MCP servers at
-  launch without OurCut popping up. The first tool call connects to the editor's pipe, starting the editor
+  launch without HighlightCut popping up. The first tool call connects to the editor's pipe, starting the editor
   (`EditorLauncher`) if it is not running, and every call is forwarded as is. If the editor was closed since,
   the next call starts it again.
 - **The pipe server** runs in the editor while Settings → MCP server → "Let Claude connect" is on (not in `--demo`
-  runs; `EditorMcpServer` stops and restarts it). The pipe is `ourcut-mcp-<user>`, created with
+  runs; `EditorMcpServer` stops and restarts it). The pipe is `highlightcut-mcp-<user>`, created with
   `PipeOptions.CurrentUserOnly`, so only the same user account can connect. One editor serves it: the one that
-  holds `<temp>/ourcut-mcp-<user>.lock` (released by the system when that editor exits, even if it crashes). A
+  holds `<temp>/highlightcut-mcp-<user>.lock` (released by the system when that editor exits, even if it crashes). A
   second window shows "MCP · In another window" and takes over when the first one closes. On Windows the first pipe
   instance is also created with `FirstPipeInstance`.
 - **The host** (`EditorMcpHost` in the App) runs each tool call on the UI thread, where the session and the view
@@ -288,7 +288,7 @@ Claude ──stdio──> OurCut.exe mcp (McpBridge) ──named pipe──> Our
 | `edit_timeline` | Several edits as one undo step, all or nothing (actions add, remove, trim, split, join, include, exclude, move, rename, color) |
 | `revert_action`, `undo`, `redo` | Take edits back |
 | `seek`, `set_playing` | Show a frame or play |
-| `open_file`, `save_project` | Open a video or project; save as `.ourcut.json` (full paths only); the user may be asked first |
+| `open_file`, `save_project` | Open a video or project; save as `.highlightcut.json` (full paths only); the user may be asked first |
 | `export`, `get_export_status`, `cancel_export` | Export like the Export button (runs in the background; the Claude panel shows it); choices left out keep the dialog's; waits up to 20 s, then Claude polls |
 
 A refused edit (`EditException`, e.g. "Clip 7 does not exist") goes back to Claude as a tool error it can act on.
@@ -296,7 +296,7 @@ Results are JSON; times are seconds, rounded to milliseconds, with `MM:SS.mmm` r
 
 ## App
 
-`OurCut.App` is MVVM (CommunityToolkit.Mvvm). `EditorViewModel` owns the session, the player and the panels; views
+`HighlightCut.App` is MVVM (CommunityToolkit.Mvvm). `EditorViewModel` owns the session, the player and the panels; views
 bind to view models and never change the project themselves.
 
 - **Sidebar tabs**: `EditorViewModel.Tab` switches between Clips and Transcript (`EditorViewModel.Transcript.cs`).
@@ -338,7 +338,7 @@ bind to view models and never change the project themselves.
   and stops the pipe server when `IsServerOn` changes, one switch at a time. The bridge connects to the editor with
   Claude's own clientInfo, so `McpPipeServer.ClientName` (`McpEndpoint.ClientTitle`: "claude-ai" is Claude Desktop,
   "claude-code" Claude Code) names the client. The editor that holds the pipe lock writes its project (file name) to
-  `<pipe>.owner` next to it; a waiting window reads it (`OtherOwnerLabel`) for "The OurCut window with … has the
+  `<pipe>.owner` next to it; a waiting window reads it (`OtherOwnerLabel`) for "The HighlightCut window with … has the
   server".
 - **Settings dialog**: `SettingsViewModel` is split by section (`SettingsViewModel.<Section>.cs`, views in
   `Views/Settings/<Section>Section.axaml`, shared styles in `Theme/Controls.axaml`). Every change goes through
@@ -348,10 +348,17 @@ bind to view models and never change the project themselves.
   them (Recent files: 5, 10 or 20). The cache card measures `MediaCache.Measure` (one folder per video) off the UI
   thread; Clear cache (`MediaCache.Clear`) keeps the open video's folder and every `transcript-*.json`.
 - **Settings file**: `AppSettings(Transcription, General?, Playback?, Export?, Keyboard?, Mcp?, Timeline?)` (records and enums
-  in `Services/Settings/`), saved by `AppSettingsStore` to `%LOCALAPPDATA%\OurCut\settings.json` with
+  in `Services/Settings/`), saved by `AppSettingsStore` to `%LOCALAPPDATA%\HighlightCut\settings.json` with
   source-generated JSON, enums by name (`LenientEnumConverter`). A section missing from the file (an older version
   wrote it, or it is at its defaults) reads as null and means the defaults; a value this version does not know falls
   back to its default, and the rest of the file is kept.
+- **App folder**: settings, `recent.json`, `models`, `cache` and `logs` live in `%LOCALAPPDATA%\HighlightCut`
+  (`AppDataFolder`). On the first start after the rename, `Program.Main` moves the old `%LOCALAPPDATA%\OurCut` there
+  (`AppDataFolder.MoveLegacy`): the whole folder when possible, else entry by entry, never overwriting what the new
+  folder has. What cannot be moved (a file in use) is still read from the old folder (`AppDataFolder.PathFor`), a
+  models folder chosen inside the old folder follows it (`Relocate`), and the log says what happened. The folder
+  keeps a `moved-from-OurCut.txt` note, and while it is there Settings → MCP server says to add HighlightCut to
+  Claude Code and Claude Desktop again (the old entries start `OurCut.exe` under the name `ourcut`).
   `Timeline` is the timeline toolbar's chips (Frames, Keyframes, Silence, Scenes, Snap), saved as they are clicked and put
   back for every project and run (`SettingsViewModel.ApplyTimeline`); the design's screens show them all and save none.
   Playback is read before the player is created, which starts with the saved decoding and audio device. Changes apply
@@ -380,14 +387,14 @@ Places where the UI and the setting exist but the behaviour does not are marked 
 - **Smart cut**: `CutMode.SmartCut` exists in the export settings; the planner rejects it for now. It becomes
   a third kind of plan (re-encode the GOP around each cut, copy the rest, concat). The dialog lists it as not
   yet available.
-- **GPU transcription**: OurCut ships the CPU-only sherpa-onnx runtime. The Device setting is wired through
+- **GPU transcription**: HighlightCut ships the CPU-only sherpa-onnx runtime. The Device setting is wired through
   (`RecognizerPlan`): with a GPU build of sherpa-onnx 1.13.8 beside the app (`onnxruntime_providers_cuda` or
   `DirectML.dll`), Auto and GPU use it. sherpa-onnx publishes CUDA builds (NVIDIA; they need CUDA 12 or 13 and
   cuDNN 9 installed) but no DirectML build.
 
 ## Transcription
 
-`OurCut.Transcription` (no UI references) turns speech into words with times, locally, with sherpa-onnx (ONNX
+`HighlightCut.Transcription` (no UI references) turns speech into words with times, locally, with sherpa-onnx (ONNX
 Runtime, CPU; see GPU transcription above). Settings → Transcription lists the models (`ModelCatalog`), all int8 builds from the sherpa-onnx
 GitHub releases (.tar.bz2): Parakeet TDT 0.6B v3 (25 European languages including Ukrainian and English; the default)
 and Whisper large-v3-turbo, small and base.en (99 languages; base.en English only).
@@ -407,7 +414,7 @@ and Whisper large-v3-turbo, small and base.en (99 languages; base.en English onl
   The published Whisper models give no times, so their words get estimated ones: the speech in the piece (stretches
   louder than the background) is shared out in proportion to word length, and the transcript says its times are
   approximate.
-- **Data**: `Word`, `Phrase` and `Transcript` live in Core (`OurCut.Core.Transcripts`), so the MCP tools use them
+- **Data**: `Word`, `Phrase` and `Transcript` live in Core (`HighlightCut.Core.Transcripts`), so the MCP tools use them
   without the engine. Phrases end at . ! ? … or pauses of 0.8 s.
 - **In the editor** (`MediaPreview`): transcription starts when asked for (the Transcript tab's Transcribe, or a
   Claude transcript tool), or when a file is opened with "Transcribe when a video is opened" on (off by default;
@@ -424,8 +431,8 @@ and Whisper large-v3-turbo, small and base.en (99 languages; base.en English onl
   folder, refusing entries that point outside it) and renames the folder to `<id>` only when every file the model
   needs is there. It checks free space first and explains failures (HTTP status, lost connection, full disk).
 - `ModelStore` answers whether a model is installed (all its files present), its size, and deletes it.
-- The settings (engine, model, device, language, models folder) are saved to `%LOCALAPPDATA%\OurCut\settings.json`;
-  models go to `%LOCALAPPDATA%\OurCut\models` unless another folder is chosen. Cancelling a download removes it;
+- The settings (engine, model, device, language, models folder) are saved to `%LOCALAPPDATA%\HighlightCut\settings.json`;
+  models go to `%LOCALAPPDATA%\HighlightCut\models` unless another folder is chosen. Cancelling a download removes it;
   a failed one is kept and continues on the next try.
 
 ## Clip names and colours
@@ -466,11 +473,11 @@ clip gets a stronger tint and a 1.5 px accent border; an excluded clip has no ti
 stripe; Claude's pulsing ring is drawn over any of them. The clip list shows the colour as a swatch before the name.
 Claude's `get_project` and every edit result list each clip's `color` by name.
 
-## Project file (`.ourcut.json`)
+## Project file (`.highlightcut.json`)
 
 ```json
 {
-  "format": "ourcut-project",
+  "format": "highlightcut-project",
   "version": 1,
   "name": "launch-keynote",
   "source": {
@@ -494,4 +501,7 @@ Claude's `get_project` and every edit result list each clip's `color` by name.
   the file is used. `color` is a palette name; clips without one get one on load. Names that appear twice get
   " · 2" added on load (see "Clip names and colours").
 - Readers ignore unknown fields. Files with a higher `version` than the app supports are rejected.
+- Projects from before the app was renamed (OurCut) are `.ourcut.json` files with `"format": "ourcut-project"`. They
+  open everywhere a project does (dialogs, drag and drop, recent files, Claude's `open_file`), and saving one writes
+  back to the same file; only Save as picks a `.highlightcut.json` name.
 - Files are written atomically (temporary file, then replace). A saved project is autosaved after edits.

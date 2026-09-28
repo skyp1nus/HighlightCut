@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Playback (libmpv), probing, export, thumbnails and waveforms. No UI dependencies. -->
+  <PropertyGroup>
+    <RootNamespace>HighlightCut.Media</RootNamespace>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\HighlightCut.Core\HighlightCut.Core.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="FFMpegCore" />
+    <PackageReference Include="SkiaSharp" />
+  </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="HighlightCut.Media.Tests" />
+  </ItemGroup>
+</Project>

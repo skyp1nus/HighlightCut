@@ -1,0 +1,39 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:HighlightCut.App.ViewModels"
+             xmlns:c="using:HighlightCut.App.Controls"
+             x:Class="HighlightCut.App.Views.ClaudeRequestBanner"
+             x:DataType="vm:IClaudeRequest">
+  <!-- Claude asks before it exports, opens a file or saves; the host puts this over the preview. -->
+  <Border Name="Box" IsVisible="{Binding IsAsking}" Padding="16,12,12,12" CornerRadius="12" Background="{StaticResource PanelBrush}"
+          BoxShadow="inset 0 1 0 0 #17FFFFFF, 0 0 0 1 #1FFFFFFF, 0 16 36 0 #73000000">
+    <Grid ColumnDefinitions="8,12,*,12,Auto">
+      <c:PulseDot Width="6" Height="6" Fill="{StaticResource TextBrush}" HorizontalAlignment="Left" VerticalAlignment="Center" />
+      <StackPanel Grid.Column="2" Spacing="3" VerticalAlignment="Center">
+        <TextBlock Name="Title" Text="{Binding RequestTitle}" FontSize="12.5" LetterSpacing="-0.2" Foreground="{StaticResource TextBrush}"
+                   TextTrimming="CharacterEllipsis" />
+        <TextBlock Name="Detail" Classes="mono" Text="{Binding RequestDetail}" FontSize="11" Foreground="{StaticResource Text4Brush}"
+                   TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding RequestDetail}" />
+      </StackPanel>
+      <StackPanel Grid.Column="4" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+        <Button Classes="ghost bright" Height="28" Padding="10,0" FontSize="12" FontWeight="Normal" Foreground="{StaticResource Text2Brush}"
+                Content="Always allow" Command="{Binding AlwaysAllowCommand}" />
+        <Button Classes="soft" Height="28" Padding="12,0" FontSize="12" Content="Deny" Command="{Binding DenyCommand}" />
+        <Button Classes="allow" Height="28" Padding="14,0" FontSize="12" Content="Allow" Command="{Binding AllowCommand}" />
+      </StackPanel>
+    </Grid>
+  </Border>
+
+  <UserControl.Styles>
+    <Style Selector="Button.allow">
+      <Setter Property="Background" Value="#1FFFFFFF" />
+      <Setter Property="BorderBrush" Value="{StaticResource KbdBorderBrush}" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="CornerRadius" Value="8" />
+      <Setter Property="FontWeight" Value="Normal" />
+    </Style>
+    <Style Selector="Button.allow:pointerover">
+      <Setter Property="Background" Value="#2BFFFFFF" />
+    </Style>
+  </UserControl.Styles>
+</UserControl>

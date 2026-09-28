@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- The MCP server that lets Claude edit the timeline, and the stdio bridge Claude starts. No UI dependencies. -->
+  <PropertyGroup>
+    <RootNamespace>HighlightCut.Mcp</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\HighlightCut.Core\HighlightCut.Core.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="ModelContextProtocol.Core" />
+  </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="HighlightCut.Mcp.Tests" />
+  </ItemGroup>
+</Project>
