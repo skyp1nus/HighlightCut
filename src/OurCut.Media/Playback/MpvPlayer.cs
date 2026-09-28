@@ -107,6 +107,13 @@ public sealed class MpvPlayer : IDisposable
     /// file with when its video output is taken away, so a renderer switch reopens the right file.
     /// </summary>
     private string? _openPath;
+
+    /// <summary>The video output changed while a file was loading: that file is reopened once it has loaded.</summary>
+    private bool _reopen;
+
+    /// <summary>A seek asked for while a file loads: mpv would apply it to the file being replaced, so it waits.</summary>
+    private (long Generation, double Time)? _seekAfterLoad;
+
     private readonly SeekState _seeks = new();
     private double _duration;
     private volatile bool _paused = true, _eof, _disposed;
@@ -207,6 +214,23 @@ public sealed class MpvPlayer : IDisposable
     /// <exception cref="MpvException">The file could not be played.</exception>
     public Task LoadAsync(string path, double startTime = 0)
     {
+        (long, double)? dropped;
+        lock (_lock)
+        {
+            dropped = _seekAfterLoad;
+            _seekAfterLoad = null;
+        }
+        // A seek in the file before this one is not wanted in this one.
+        if (dropped is (long generation, _))
+            _seeks.Replied(generation, failed: true);
+        // "start" and "pause" apply to the next file; loadfile's own option syntax differs between versions.
+        Command(0, "set", "pause", "yes");
+        return Open(path, startTime);
+    }
+
+    /// <summary>Loads <paramref name="path"/> at <paramref name="startTime"/>, leaving pause as it is.</summary>
+    private Task Open(string path, double startTime)
+    {
         var tcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         lock (_lock)
         {
@@ -214,11 +238,10 @@ public sealed class MpvPlayer : IDisposable
             _loading = tcs;
             _loadingPath = path;
             _openPath = path;
+            _reopen = false;
             _audioMix = null;
             _errors.Clear();
         }
-        // "start" and "pause" apply to the next file; loadfile's own option syntax differs between versions.
-        Command(0, "set", "pause", "yes");
         Command(0, "set", "start", Seconds(startTime));
         Command(0, "loadfile", path, "replace");
         return tcs.Task;
@@ -227,12 +250,18 @@ public sealed class MpvPlayer : IDisposable
     /// <summary>Stops playback and unloads the file.</summary>
     public void Unload()
     {
+        (long, double)? dropped;
         lock (_lock)
         {
             _loading?.TrySetCanceled();
             _loading = null;
             _openPath = null;
+            _reopen = false;
+            dropped = _seekAfterLoad;
+            _seekAfterLoad = null;
         }
+        if (dropped is (long generation, _))
+            _seeks.Replied(generation, failed: true);
         LoadedPath = null;
         Command(0, "stop");
     }
@@ -241,13 +270,24 @@ public sealed class MpvPlayer : IDisposable
 
     public void Pause() => Command(0, "set", "pause", "yes");
 
-    /// <summary>Exact seek to a source time.</summary>
+    /// <summary>Exact seek to a source time. While a file loads, the seek is made once it has loaded.</summary>
     public void Seek(double time)
     {
         long generation = _seeks.Request(time);
         _eof = false;
-        Command(SeekTag | (ulong)generation, "seek", Seconds(time), "absolute+exact");
+        lock (_lock)
+        {
+            if (_loading is not null)
+            {
+                _seekAfterLoad = (generation, time);
+                return;
+            }
+        }
+        SendSeek(generation, time);
     }
+
+    private void SendSeek(long generation, double time) =>
+        Command(SeekTag | (ulong)generation, "seek", Seconds(time), "absolute+exact");
 
     /// <summary>One frame forward or back (pauses playback).</summary>
     public void StepFrame(bool forward) => Command(0, forward ? "frame-step" : "frame-back-step");
@@ -409,38 +449,34 @@ public sealed class MpvPlayer : IDisposable
 
     /// <summary>
     /// The video output is chosen when a file loads, so the loaded file is reopened where it was. A load
-    /// still in flight finishes first (its caller is waiting for it).
+    /// still in flight finishes first (its caller is waiting for it), and is reopened when it lands.
     /// </summary>
     private void SwitchVideoOutput(string vo)
     {
         if (_disposed)
             return;
-        Task pending;
+        Command(0, "set", "vo", vo);
         string? path;
         lock (_lock)
         {
-            pending = _loading?.Task ?? Task.CompletedTask;
             path = _openPath;
-        }
-        // Where the video is now (a load in flight decides it when it lands).
-        double? position = pending.IsCompleted ? Position : null;
-        bool wasPlaying = IsPlaying;
-        Command(0, "set", "vo", vo);
-        if (path is null)
-            return;
-        _ = pending.ContinueWith(previous =>
-        {
-            // Unloaded, or another file opened meanwhile: that one is loaded with the new output already.
-            if (_disposed || !string.Equals(Volatile.Read(ref _openPath), path, StringComparison.Ordinal))
-                return;
-            _ = LoadAsync(path, position ?? Position).ContinueWith(t =>
+            if (path is not null && _loading is not null)
             {
-                if (t.IsCompletedSuccessfully && wasPlaying)
-                    Play();
-                _ = t.Exception;
-            }, CancellationToken.None, TaskContinuationOptions.None, TaskScheduler.Default);
-        }, CancellationToken.None, TaskContinuationOptions.None, TaskScheduler.Default);
+                _reopen = true;
+                return;
+            }
+        }
+        if (path is not null)
+            Reopen(path);
     }
+
+    /// <summary>
+    /// Loads the open file again at <see cref="Position"/>, playing or paused as it is. Sent at once, so a seek, play
+    /// or pause that follows applies to the reopened file and is not undone by it.
+    /// </summary>
+    private void Reopen(string path) =>
+        _ = Open(path, Position).ContinueWith(t => _ = t.Exception, CancellationToken.None,
+            TaskContinuationOptions.OnlyOnFaulted, TaskScheduler.Default);
 
     // ---- Events -------------------------------------------------------------------------
 
@@ -535,14 +571,28 @@ public sealed class MpvPlayer : IDisposable
     private void OnFileLoaded()
     {
         TaskCompletionSource? loading;
+        string? reopen;
+        (long, double)? seek = null;
         lock (_lock)
         {
             loading = _loading;
             _loading = null;
             LoadedPath = _loadingPath;
+            reopen = _reopen ? _openPath : null;
+            _reopen = false;
+            // Reopening starts at a waiting seek's target (the position) and makes it once more after.
+            if (reopen is null)
+            {
+                seek = _seekAfterLoad;
+                _seekAfterLoad = null;
+            }
         }
         _eof = false;
         loading?.TrySetResult();
+        if (reopen is not null)
+            Reopen(reopen);
+        else if (seek is (long generation, double time))
+            SendSeek(generation, time);
         RaiseChanged();
     }
 
@@ -552,12 +602,26 @@ public sealed class MpvPlayer : IDisposable
             return;
         TaskCompletionSource? loading;
         string detail;
+        string? reopen;
+        (long, double)? dropped = null;
         lock (_lock)
         {
             loading = _loading;
             _loading = null;
             detail = _errors.Count > 0 ? string.Join(" ", _errors) : MpvNative.ErrorText(end.Error);
+            // A load that failed while the video output changed is tried once more with the new output.
+            reopen = _reopen ? _openPath : null;
+            _reopen = false;
+            if (reopen is null)
+            {
+                dropped = _seekAfterLoad;
+                _seekAfterLoad = null;
+            }
         }
+        if (dropped is (long generation, _))
+            _seeks.Replied(generation, failed: true);
+        if (reopen is not null)
+            Reopen(reopen);
         LoadedPath = null;
         LastError = detail;
         loading?.TrySetException(new MpvException("mpv could not play the file: " + detail));

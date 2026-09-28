@@ -172,9 +172,11 @@ internal sealed class Connection : IAsyncDisposable
     public static async Task<Connection> OpenAsync(IEditorHost host)
     {
         var server = new McpPipeServer(host, NewPipeName());
-        server.Start();
+        // Connect once the pipe is there: ConnectAsync blocks a thread-pool thread while it waits, and on a busy runner
+        // that can starve the server's own start of the thread it needs.
+        await server.Start().WaitAsync(TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
         var pipe = new NamedPipeClientStream(".", server.PipeName, PipeDirection.InOut, PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
-        await pipe.ConnectAsync(5000, TestContext.Current.CancellationToken);
+        await pipe.ConnectAsync(30_000, TestContext.Current.CancellationToken);
         var client = await McpClient.CreateAsync(new StreamClientTransport(pipe, pipe), cancellationToken: TestContext.Current.CancellationToken);
         return new Connection(server, pipe, client);
     }
@@ -212,7 +214,7 @@ public class McpToolListTests
     [
         "add_segment", "cancel_export", "cut_filler_words", "cut_ranges", "cut_silences", "edit_timeline", "export",
         "find_filler_words", "find_keyframes", "find_scene_changes", "find_silences", "get_export_status", "get_history", "get_project",
-        "get_transcript", "list_videos", "move_segment", "open_file", "redo", "remove_segment", "revert_action", "save_project",
+        "get_transcript", "join_segments", "list_videos", "move_segment", "open_file", "redo", "remove_segment", "revert_action", "save_project",
         "search_transcript", "seek", "set_color", "set_included", "set_label", "set_playing", "split_segment", "trim_segment", "undo",
     ];
 
@@ -354,6 +356,57 @@ public class McpEditingTests
         var unknown = await c.Client.Call("set_color", new { clip = 1, color = "blue" });
         Assert.True(unknown.IsError);
         Assert.Contains("teal, amber", unknown.Text(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Clips_have_unique_names_and_colours_claude_can_set()
+    {
+        var editor = new FakeEditor();
+        await using var c = await Connection.OpenAsync(editor);
+
+        var add = await c.Client.Call("add_segment", new { start = 30, end = 60 });
+        Assert.True(add.IsError);
+        Assert.Contains("overlaps clip 1", add.Text(), StringComparison.Ordinal);
+
+        var trim = await c.Client.Call("trim_segment", new { clip = 2, start = 35 });
+        Assert.True(trim.IsError);
+        Assert.Contains("overlaps clip 1", trim.Text(), StringComparison.Ordinal);
+
+        var batch = await c.Client.Call("edit_timeline", new
+        {
+            description = "Overlap",
+            operations = new object[] { new { action = "add", start = 190, end = 250 } },
+        });
+        Assert.True(batch.IsError);
+        Assert.Empty(editor.Session.History.Entries);
+    }
+
+    [Fact]
+    public async Task Join_segments_joins_a_clip_with_the_one_right_after_it()
+    {
+        var editor = new FakeEditor();
+        await using var c = await Connection.OpenAsync(editor);
+        (await c.Client.Call("trim_segment", new { clip = 1, end = 100 })).Json();
+
+        var result = (await c.Client.Call("join_segments", new { clip = 1 })).Json();
+
+        Assert.Equal("Joined clips 1 and 2", result.GetProperty("result").GetString());
+        var joined = editor.Session.Project.Get(1);
+        Assert.Equal(("Intro", 10.0, 200.0), (joined.Label, joined.Start, joined.End));
+        Assert.Null(editor.Session.Project.Find(2));
+        Assert.Equal(EditOrigin.Assistant, editor.Session.History.NextUndo!.Origin);
+
+        var far = await c.Client.Call("join_segments", new { clip = 1 });
+        Assert.True(far.IsError);
+        Assert.Contains("apart", far.Text(), StringComparison.Ordinal);
+
+        // In a batch, "join" finds the next clip after the operations before it.
+        (await c.Client.Call("edit_timeline", new
+        {
+            description = "Closed the gap",
+            operations = new object[] { new { action = "trim", clip = 3, start = 200 }, new { action = "join", clip = 1 } },
+        })).Json();
+        Assert.Equal(360, editor.Session.Project.Get(1).End);
     }
 
     [Fact]
@@ -500,14 +553,13 @@ public class McpEditingTests
     public async Task The_server_counts_its_sessions()
     {
         var server = new McpPipeServer(new FakeEditor(), Connection.NewPipeName());
-        server.Start();
         await using (server)
         {
-            await WaitUntil(() => server.IsListening);
+            await server.Start().WaitAsync(TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
             int changes = 0;
             server.StateChanged += (_, _) => Interlocked.Increment(ref changes);
             var pipe = new NamedPipeClientStream(".", server.PipeName, PipeDirection.InOut, PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
-            await pipe.ConnectAsync(5000, TestContext.Current.CancellationToken);
+            await pipe.ConnectAsync(30_000, TestContext.Current.CancellationToken);
             await WaitUntil(() => server.Sessions == 1);
             await pipe.DisposeAsync();
             await WaitUntil(() => server.Sessions == 0);
@@ -521,10 +573,9 @@ public class McpEditingTests
     {
         string name = Connection.NewPipeName();
         var first = new McpPipeServer(new FakeEditor(), name);
-        first.Start();
-        await WaitUntil(() => first.IsListening);
+        await first.Start().WaitAsync(TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
         await using var second = new McpPipeServer(new FakeEditor(), name) { RetryDelay = TimeSpan.FromMilliseconds(50) };
-        second.Start();
+        _ = second.Start();
         await WaitUntil(() => second.IsInUseElsewhere);
         Assert.False(second.IsListening);
 
@@ -538,12 +589,11 @@ public class McpEditingTests
     {
         string name = Connection.NewPipeName();
         var first = new McpPipeServer(new FakeEditor(), name) { OwnerLabel = "keynote.mp4" };
-        first.Start();
-        await WaitUntil(() => first.IsListening);
+        await first.Start().WaitAsync(TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
         await using var second = new McpPipeServer(new FakeEditor(), name) { RetryDelay = TimeSpan.FromMilliseconds(50), OwnerLabel = "talk.mp4" };
         int changes = 0;
         second.StateChanged += (_, _) => Interlocked.Increment(ref changes);
-        second.Start();
+        _ = second.Start();
         await WaitUntil(() => second.OtherOwnerLabel == "keynote.mp4");
         Assert.True(second.IsInUseElsewhere);
 
@@ -566,10 +616,9 @@ public class McpEditingTests
     {
         var editor = new FakeEditor();
         await using var server = new McpPipeServer(editor, Connection.NewPipeName());
-        server.Start();
-        await WaitUntil(() => server.IsListening);
+        await server.Start().WaitAsync(TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
         await using var pipe = new NamedPipeClientStream(".", server.PipeName, PipeDirection.InOut, PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
-        await pipe.ConnectAsync(5000, TestContext.Current.CancellationToken);
+        await pipe.ConnectAsync(30_000, TestContext.Current.CancellationToken);
         await using var client = await McpClient.CreateAsync(new StreamClientTransport(pipe, pipe),
             new McpClientOptions { ClientInfo = new Implementation { Name = "claude-code", Version = "2.1.0" } },
             cancellationToken: TestContext.Current.CancellationToken);
@@ -595,20 +644,21 @@ public class McpEditingTests
         // On Unix a pipe is a socket file, which stays behind when its editor is killed.
         string socket = Path.Combine(Path.GetTempPath(), "CoreFxPipe_" + server.PipeName);
         await File.WriteAllTextAsync(socket, "", TestContext.Current.CancellationToken);
-        server.Start();
         await using (server)
         {
-            await WaitUntil(() => server.IsListening);
+            await server.Start().WaitAsync(TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
             await using var pipe = new NamedPipeClientStream(".", server.PipeName, PipeDirection.InOut,
                 PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
-            await pipe.ConnectAsync(5000, TestContext.Current.CancellationToken);
+            await pipe.ConnectAsync(30_000, TestContext.Current.CancellationToken);
             await WaitUntil(() => server.Sessions == 1);
         }
     }
 
+    /// <summary>Polls for up to 15 s, which a busy CI runner running the other test assemblies alongside may need.</summary>
     internal static async Task WaitUntil(Func<bool> condition)
     {
-        for (int i = 0; i < 250 && !condition(); i++)
+        var deadline = DateTime.UtcNow.AddSeconds(15);
+        while (!condition() && DateTime.UtcNow < deadline)
             await Task.Delay(20, TestContext.Current.CancellationToken);
         Assert.True(condition());
     }
@@ -949,7 +999,7 @@ public class McpBridgeTests
             server = new McpPipeServer(editor, pipeName);
             server.Start();
             return true;
-        }, pipeName, TimeSpan.FromSeconds(10)));
+        }, pipeName, TimeSpan.FromSeconds(30)));
         var client = await run.ConnectAsync();
 
         var tools = await client.ListToolsAsync(cancellationToken: TestContext.Current.CancellationToken);
@@ -974,7 +1024,8 @@ public class McpBridgeTests
     {
         string pipeName = Connection.NewPipeName();
         await using var server = new McpPipeServer(new FakeEditor(), pipeName);
-        server.Start();
+        // Listening before the bridge looks: it only tries briefly before it would launch an editor.
+        await server.Start().WaitAsync(TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
         await using var run = new BridgeRun(new McpBridge(() => throw new InvalidOperationException("should not launch"), pipeName));
         var client = await run.ConnectAsync();
 
@@ -986,7 +1037,7 @@ public class McpBridgeTests
     {
         string pipeName = Connection.NewPipeName();
         await using var server = new McpPipeServer(new FakeEditor(), pipeName);
-        server.Start();
+        await server.Start().WaitAsync(TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
         await using var run = new BridgeRun(new McpBridge(() => false, pipeName));
         var client = await run.ConnectAsync(new Implementation { Name = "claude-ai", Version = "0.14.0" });
 

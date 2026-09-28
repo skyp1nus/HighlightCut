@@ -65,6 +65,8 @@
                   </Style>
                 </MenuItem.Styles>
               </MenuItem>
+              <MenuItem Header="Join with next" InputGesture="J" Command="{Binding JoinWithNextCommand}"
+                        IsEnabled="{Binding CanJoinWithNext}" />
               <Separator />
               <MenuItem Header="Delete clip" InputGesture="Delete" Command="{Binding DeleteClipCommand}"
                         IsEnabled="{Binding HasSelection}" />

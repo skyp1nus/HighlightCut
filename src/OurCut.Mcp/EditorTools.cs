@@ -115,8 +115,8 @@ public sealed record ScenesResult(
 
 /// <summary>One step of <c>edit_timeline</c>.</summary>
 public sealed record EditOperation(
-    [property: Description("add, remove, trim, split, include, exclude, move, rename or color.")] string Action,
-    [property: Description("Clip id (all actions except add).")] int? Clip = null,
+    [property: Description("add, remove, trim, split, join, include, exclude, move, rename or color.")] string Action,
+    [property: Description("Clip id (all actions except add); for join, the first of the two clips.")] int? Clip = null,
     [property: Description("Seconds: the range for add, a new start for trim.")] double? Start = null,
     [property: Description("Seconds: the range for add, a new end for trim.")] double? End = null,
     [property: Description("Seconds: where to split.")] double? Time = null,
@@ -274,7 +274,8 @@ public sealed class EditorTools(IEditorHost host)
     // ---- Editing -------------------------------------------------------------------------
 
     [McpServerTool(Name = "add_segment", Title = "Keep a range")]
-    [Description("Keeps a range of the source as a new clip. Returns the updated clip list; the new clip is the one with the highest id.")]
+    [Description("Keeps a range of the source as a new clip. Returns the updated clip list; the new clip is the one with the highest id. " +
+                 "Clips cannot share source time (it would be exported twice): a range that overlaps another clip is refused.")]
     public Task<EditResult> AddSegment(
         [Description("Seconds.")] double start,
         [Description("Seconds.")] double end,
@@ -290,7 +291,7 @@ public sealed class EditorTools(IEditorHost host)
     public Task<EditResult> RemoveSegment(int clip) => Edit(_ => new RemoveClipCommand(clip));
 
     [McpServerTool(Name = "trim_segment", Title = "Trim a clip")]
-    [Description("Moves a clip's start and/or end.")]
+    [Description("Moves a clip's start and/or end. A clip cannot grow into another clip; to make two clips one, use join_segments.")]
     public Task<EditResult> TrimSegment(int clip, [Description("New start, seconds.")] double? start = null,
         [Description("New end, seconds.")] double? end = null) =>
         Edit(_ => new PartialTrimCommand(clip, start, end));
@@ -299,6 +300,13 @@ public sealed class EditorTools(IEditorHost host)
     [Description("Splits a clip in two at a source time; the second part gets a new id.")]
     public Task<EditResult> SplitSegment(int clip, [Description("Seconds, inside the clip.")] double time) =>
         Edit(_ => new SplitClipCommand(clip, time));
+
+    [McpServerTool(Name = "join_segments", Title = "Join two clips")]
+    [Description("Joins a clip with the clip right after it on the source timeline into one clip, which keeps the first clip's " +
+                 "id, label and inclusion. The two must touch or be less than 0.5 s apart (the gap is kept too) and be next " +
+                 "to each other in the output.")]
+    public Task<EditResult> JoinSegments([Description("The first of the two clips.")] int clip) =>
+        Edit(project => JoinClipsCommand.WithNext(project, clip));
 
     [McpServerTool(Name = "set_included", Title = "Exclude or keep a clip")]
     [Description("Excludes a clip from the export (it stays in the project) or includes it again.")]
@@ -814,12 +822,13 @@ public sealed class EditorTools(IEditorHost host)
             "remove" => new RemoveClipCommand(Clip()),
             "trim" => new PartialTrimCommand(Clip(), op.Start, op.End),
             "split" => new SplitClipCommand(Clip(), Need(op.Time, "time")),
+            "join" => new JoinNextCommand(Clip()),
             "include" => new SetClipIncludedCommand(Clip(), true),
             "exclude" => new SetClipIncludedCommand(Clip(), false),
             "move" => new MoveClipCommand(Clip(), (op.Position ?? throw new EditException("“move” needs a position.")) - 1),
             "rename" => new RenameClipCommand(Clip(), op.Label ?? throw new EditException("“rename” needs a label.")),
             "color" or "colour" => new SetClipColorCommand(Clip(), ParseColor(op.Color ?? throw new EditException("“color” needs a color."))),
-            _ => throw new EditException($"Unknown action “{op.Action}”; use add, remove, trim, split, include, exclude, move, rename or color."),
+            _ => throw new EditException($"Unknown action “{op.Action}”; use add, remove, trim, split, join, include, exclude, move, rename or color."),
         };
     }
 
@@ -878,4 +887,14 @@ internal sealed record PartialTrimCommand(int ClipId, double? Start, double? End
         var clip = project.Get(ClipId);
         return new SetClipRangeCommand(ClipId, Start ?? clip.Start, End ?? clip.End);
     }
+}
+
+/// <summary>Joins a clip with the one after it, found when the edit is applied (after the operations before it).</summary>
+internal sealed record JoinNextCommand(int ClipId) : IEditCommand
+{
+    public string Name => "join_segments";
+
+    public string Describe(Project before) => JoinClipsCommand.WithNext(before, ClipId).Describe(before);
+
+    public Project Apply(Project project) => JoinClipsCommand.WithNext(project, ClipId).Apply(project);
 }

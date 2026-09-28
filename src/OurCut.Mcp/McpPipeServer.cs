@@ -37,6 +37,7 @@ public static class McpEndpoint
 public sealed class McpPipeServer(IEditorHost host, string? pipeName = null) : IAsyncDisposable
 {
     private readonly CancellationTokenSource _stop = new();
+    private readonly TaskCompletionSource _listeningOnce = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly IReadOnlyList<McpServerTool> _tools = EditorTools.Create(host);
     private Task? _listening;
     private int _sessions;
@@ -108,7 +109,15 @@ public sealed class McpPipeServer(IEditorHost host, string? pipeName = null) : I
     /// <summary>Raised on a background thread when a session starts or ends, or listening starts or stops.</summary>
     public event EventHandler? StateChanged;
 
-    public void Start() => _listening ??= Task.Run(() => ListenAsync(_stop.Token));
+    /// <summary>
+    /// Starts listening in the background. The task completes once Claude can connect (while another editor serves the
+    /// pipe, when that one closes), and is cancelled if the server stops first.
+    /// </summary>
+    public Task Start()
+    {
+        _listening ??= Task.Run(() => ListenAsync(_stop.Token));
+        return _listeningOnce.Task;
+    }
 
     private async Task ListenAsync(CancellationToken ct)
     {
@@ -123,6 +132,7 @@ public sealed class McpPipeServer(IEditorHost host, string? pipeName = null) : I
                     continue;
                 }
                 SetState(listening: true, inUse: false);
+                _listeningOnce.TrySetResult();
                 try
                 {
                     await pipe.WaitForConnectionAsync(ct).ConfigureAwait(false);
@@ -146,6 +156,7 @@ public sealed class McpPipeServer(IEditorHost host, string? pipeName = null) : I
         finally
         {
             SetState(listening: false, inUse: false);
+            _listeningOnce.TrySetCanceled(CancellationToken.None);
             lock (_ownerGate)
             {
                 if (_lock is not null)

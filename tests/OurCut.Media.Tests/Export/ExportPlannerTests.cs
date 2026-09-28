@@ -86,6 +86,43 @@ public class ExportPlannerTests
     }
 
     [Fact]
+    public void Overlapping_clips_of_an_old_project_are_not_exported_twice()
+    {
+        // Saved before clips were kept apart: clip 2 repeats 2.5–3.2 of clip 1, clip 3 lies inside clip 1.
+        var project = SampleProject with
+        {
+            Clips = [new Clip(1, "Intro", 1.5, 3.2), new Clip(2, "Demo", 2.5, 6), new Clip(3, "Again", 2, 3)],
+        };
+        foreach (var settings in new[] { Settings(CutMode.Reencode), Settings(CutMode.Reencode, merge: false), Settings(merge: false) })
+        {
+            var plan = Plan(settings, project);
+            Assert.Equal([(1, 1.5, 3.2), (2, 3.2, 6.0)], plan.Clips.Select(c => (c.ClipId, c.Start, c.End)));
+            for (int i = 1; i < plan.Clips.Count; i++)
+                Assert.True(plan.Clips[i].Start >= plan.Clips[i - 1].End);
+            Assert.Equal(settings.Merge ? 1 : 2, plan.Outputs.Count);
+        }
+        Assert.Equal(4.5, Plan(Settings(CutMode.Reencode), project).OutputDuration, 9);
+    }
+
+    [Fact]
+    public void A_lossless_merge_cuts_touching_clips_as_one_so_the_keyframe_lead_in_is_not_repeated()
+    {
+        var project = SampleProject with
+        {
+            Clips = [new Clip(1, "Intro", 1.5, 3.2), new Clip(2, "Demo", 3.2, 6), new Clip(3, "Outro", 8, 9)],
+        };
+
+        var plan = Plan(Settings(), project);
+
+        // Cut separately, clip 2 would start at the keyframe at 3 s and play 3.0–3.2 again.
+        Assert.Equal([(1, 1.5, 6.0), (3, 8.0, 9.0)], plan.Clips.Select(c => (c.ClipId, c.Start, c.End)));
+        Assert.Equal(1.0, plan.Clips[0].OutputStart);
+        Assert.Equal(5.0 + 1.0, plan.OutputDuration, 9);
+        // Separate files are whole files each, so they stay one per clip.
+        Assert.Equal(3, Plan(Settings(merge: false), project).Clips.Count);
+    }
+
+    [Fact]
     public void Chapters_can_be_turned_off() =>
         Assert.Null(Plan(Settings() with { AddChapters = false }).ChaptersPath);
 

@@ -308,7 +308,7 @@ public sealed partial class EditorViewModel : ViewModelBase
     // ---- Selection -----------------------------------------------------------------------
 
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(ExcludeLabel), nameof(HasSelection), nameof(SelectionInfo))]
+    [NotifyPropertyChangedFor(nameof(ExcludeLabel), nameof(HasSelection), nameof(SelectionInfo), nameof(CanJoinWithNext))]
     public partial ClipViewModel? SelectedClip { get; set; }
 
     public bool HasSelection => SelectedClip is not null;
@@ -591,6 +591,12 @@ public sealed partial class EditorViewModel : ViewModelBase
         if (ShowFrames)
             media.ExtractThumbnails();
         Processing.Track(IsDemo ? null : media, MediaFileName, info, project.SourceDuration);
+        // Saved before clips were kept apart: the export already plays each second once; say how to tidy the clips up.
+        if (project.Overlaps() is [var (first, second), ..])
+        {
+            ShowMessage($"Clips {project.NumberOf(first.Id)} and {project.NumberOf(second.Id)} overlap. The export leaves out " +
+                        "the repeated part; trim or join them (J) to tidy up.");
+        }
     }
 
     /// <summary>Makes the recognizer (tests use a fake); sherpa-onnx if null.</summary>
@@ -1131,22 +1137,29 @@ public sealed partial class EditorViewModel : ViewModelBase
             return;
         if (SelectedClip is { } c && Time < c.End - EditRules.MinClipDuration)
         {
-            TryEdit(() => Session.SetRange(c.Id, Time, c.End));
+            // Stops at the end of the clip before, like dragging the handle.
+            TryEdit(() => Session.Trim(c.Id, ClipEdge.In, Time));
             return;
         }
         TryEdit(() =>
         {
-            var clip = Session.AddClip(Time, Math.Min(Duration, Time + 10));
+            // Up to 10 s, and not into the next clip: clips never share source time.
+            var project = Session.Project;
+            if (project.FirstOverlapping(Time, Time + EditRules.MinClipDuration) is { } under)
+                throw new EditException($"The playhead is in clip {project.NumberOf(under.Id)}; select it to move its in-point.");
+            var free = project.FreeRange(Time, Math.Min(Duration, Time + 10))
+                       ?? throw new EditException($"There is less than {EditRules.MinClipDuration} s before the next clip.");
+            var clip = Session.AddClip(free.Start, free.End);
             Select(Find(clip.Id));
         });
     }
 
-    /// <summary>O: move the selected clip's out-point here.</summary>
+    /// <summary>O: move the selected clip's out-point here (up to the next clip).</summary>
     [RelayCommand]
     public void MarkOut()
     {
         if (SelectedClip is { } c && Time > c.Start + EditRules.MinClipDuration)
-            TryEdit(() => Session.SetRange(c.Id, c.Start, Time));
+            TryEdit(() => Session.Trim(c.Id, ClipEdge.Out, Time));
     }
 
     /// <summary>S: split the selected clip (or the clip under the playhead) at the playhead.</summary>
@@ -1159,6 +1172,20 @@ public sealed partial class EditorViewModel : ViewModelBase
             return;
         TryEdit(() => Select(Find(Session.Split(c.Id, Time).Id)));
     }
+
+    /// <summary>
+    /// J: join the selected clip with the clip right after it on the timeline, when the two touch or are less than
+    /// <see cref="EditRules.JoinGap"/> apart. One undo step; the joined clip keeps the first clip's name.
+    /// </summary>
+    [RelayCommand]
+    public void JoinWithNext()
+    {
+        if (SelectedClip is { } c)
+            TryEdit(() => Select(Find(Session.JoinWithNext(c.Id).Id)));
+    }
+
+    /// <summary>The selected clip can be joined with the next one (for the menu).</summary>
+    public bool CanJoinWithNext => SelectedClip is { } c && Session.CanJoinWithNext(c.Id);
 
     /// <summary>E: exclude the selected clip from the export, or keep it again.</summary>
     [RelayCommand]
@@ -1221,11 +1248,13 @@ public sealed partial class EditorViewModel : ViewModelBase
     }
 
     /// <summary>
-    /// Drags one end of a clip. Calls with the same <paramref name="mergeKey"/> (one drag) undo as one step.
+    /// Drags one end of a clip. It stops at the neighbouring clip and, within <paramref name="snapThreshold"/> seconds,
+    /// snaps onto its edge (always) or onto a keyframe (with the Snap chip on). Calls with the same
+    /// <paramref name="mergeKey"/> (one drag) undo as one step.
     /// </summary>
     public void Trim(ClipViewModel clip, bool inPoint, double t, double snapThreshold = 0, string? mergeKey = null) =>
-        TryEdit(() => SetTime(Session.Trim(clip.Id, inPoint ? ClipEdge.In : ClipEdge.Out, t,
-            SnapToKeyframes ? snapThreshold : 0, mergeKey)));
+        TryEdit(() => SetTime(Session.Trim(clip.Id, inPoint ? ClipEdge.In : ClipEdge.Out, t, snapThreshold, mergeKey,
+            snapToKeyframes: SnapToKeyframes)));
 
     public void Select(ClipViewModel? clip)
     {
@@ -1466,6 +1495,7 @@ public sealed partial class EditorViewModel : ViewModelBase
         OnPropertyChanged(nameof(ExcludedText));
         OnPropertyChanged(nameof(ExcludeLabel));
         OnPropertyChanged(nameof(SelectionInfo));
+        OnPropertyChanged(nameof(CanJoinWithNext));
         OnPropertyChanged(nameof(CanExport));
         OnTimeChanged(Time);
     }
