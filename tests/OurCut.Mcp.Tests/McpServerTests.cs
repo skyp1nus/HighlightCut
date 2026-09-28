@@ -172,9 +172,11 @@ internal sealed class Connection : IAsyncDisposable
     public static async Task<Connection> OpenAsync(IEditorHost host)
     {
         var server = new McpPipeServer(host, NewPipeName());
-        server.Start();
+        // Connect once the pipe is there: ConnectAsync blocks a thread-pool thread while it waits, and on a busy runner
+        // that can starve the server's own start of the thread it needs.
+        await server.Start().WaitAsync(TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
         var pipe = new NamedPipeClientStream(".", server.PipeName, PipeDirection.InOut, PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
-        await pipe.ConnectAsync(5000, TestContext.Current.CancellationToken);
+        await pipe.ConnectAsync(30_000, TestContext.Current.CancellationToken);
         var client = await McpClient.CreateAsync(new StreamClientTransport(pipe, pipe), cancellationToken: TestContext.Current.CancellationToken);
         return new Connection(server, pipe, client);
     }
@@ -468,14 +470,13 @@ public class McpEditingTests
     public async Task The_server_counts_its_sessions()
     {
         var server = new McpPipeServer(new FakeEditor(), Connection.NewPipeName());
-        server.Start();
         await using (server)
         {
-            await WaitUntil(() => server.IsListening);
+            await server.Start().WaitAsync(TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
             int changes = 0;
             server.StateChanged += (_, _) => Interlocked.Increment(ref changes);
             var pipe = new NamedPipeClientStream(".", server.PipeName, PipeDirection.InOut, PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
-            await pipe.ConnectAsync(5000, TestContext.Current.CancellationToken);
+            await pipe.ConnectAsync(30_000, TestContext.Current.CancellationToken);
             await WaitUntil(() => server.Sessions == 1);
             await pipe.DisposeAsync();
             await WaitUntil(() => server.Sessions == 0);
@@ -489,10 +490,9 @@ public class McpEditingTests
     {
         string name = Connection.NewPipeName();
         var first = new McpPipeServer(new FakeEditor(), name);
-        first.Start();
-        await WaitUntil(() => first.IsListening);
+        await first.Start().WaitAsync(TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
         await using var second = new McpPipeServer(new FakeEditor(), name) { RetryDelay = TimeSpan.FromMilliseconds(50) };
-        second.Start();
+        _ = second.Start();
         await WaitUntil(() => second.IsInUseElsewhere);
         Assert.False(second.IsListening);
 
@@ -506,12 +506,11 @@ public class McpEditingTests
     {
         string name = Connection.NewPipeName();
         var first = new McpPipeServer(new FakeEditor(), name) { OwnerLabel = "keynote.mp4" };
-        first.Start();
-        await WaitUntil(() => first.IsListening);
+        await first.Start().WaitAsync(TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
         await using var second = new McpPipeServer(new FakeEditor(), name) { RetryDelay = TimeSpan.FromMilliseconds(50), OwnerLabel = "talk.mp4" };
         int changes = 0;
         second.StateChanged += (_, _) => Interlocked.Increment(ref changes);
-        second.Start();
+        _ = second.Start();
         await WaitUntil(() => second.OtherOwnerLabel == "keynote.mp4");
         Assert.True(second.IsInUseElsewhere);
 
@@ -534,10 +533,9 @@ public class McpEditingTests
     {
         var editor = new FakeEditor();
         await using var server = new McpPipeServer(editor, Connection.NewPipeName());
-        server.Start();
-        await WaitUntil(() => server.IsListening);
+        await server.Start().WaitAsync(TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
         await using var pipe = new NamedPipeClientStream(".", server.PipeName, PipeDirection.InOut, PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
-        await pipe.ConnectAsync(5000, TestContext.Current.CancellationToken);
+        await pipe.ConnectAsync(30_000, TestContext.Current.CancellationToken);
         await using var client = await McpClient.CreateAsync(new StreamClientTransport(pipe, pipe),
             new McpClientOptions { ClientInfo = new Implementation { Name = "claude-code", Version = "2.1.0" } },
             cancellationToken: TestContext.Current.CancellationToken);
@@ -563,20 +561,21 @@ public class McpEditingTests
         // On Unix a pipe is a socket file, which stays behind when its editor is killed.
         string socket = Path.Combine(Path.GetTempPath(), "CoreFxPipe_" + server.PipeName);
         await File.WriteAllTextAsync(socket, "", TestContext.Current.CancellationToken);
-        server.Start();
         await using (server)
         {
-            await WaitUntil(() => server.IsListening);
+            await server.Start().WaitAsync(TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
             await using var pipe = new NamedPipeClientStream(".", server.PipeName, PipeDirection.InOut,
                 PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
-            await pipe.ConnectAsync(5000, TestContext.Current.CancellationToken);
+            await pipe.ConnectAsync(30_000, TestContext.Current.CancellationToken);
             await WaitUntil(() => server.Sessions == 1);
         }
     }
 
+    /// <summary>Polls for up to 15 s, which a busy CI runner running the other test assemblies alongside may need.</summary>
     internal static async Task WaitUntil(Func<bool> condition)
     {
-        for (int i = 0; i < 250 && !condition(); i++)
+        var deadline = DateTime.UtcNow.AddSeconds(15);
+        while (!condition() && DateTime.UtcNow < deadline)
             await Task.Delay(20, TestContext.Current.CancellationToken);
         Assert.True(condition());
     }
@@ -914,7 +913,7 @@ public class McpBridgeTests
             server = new McpPipeServer(editor, pipeName);
             server.Start();
             return true;
-        }, pipeName, TimeSpan.FromSeconds(10)));
+        }, pipeName, TimeSpan.FromSeconds(30)));
         var client = await run.ConnectAsync();
 
         var tools = await client.ListToolsAsync(cancellationToken: TestContext.Current.CancellationToken);
@@ -939,7 +938,8 @@ public class McpBridgeTests
     {
         string pipeName = Connection.NewPipeName();
         await using var server = new McpPipeServer(new FakeEditor(), pipeName);
-        server.Start();
+        // Listening before the bridge looks: it only tries briefly before it would launch an editor.
+        await server.Start().WaitAsync(TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
         await using var run = new BridgeRun(new McpBridge(() => throw new InvalidOperationException("should not launch"), pipeName));
         var client = await run.ConnectAsync();
 
@@ -951,7 +951,7 @@ public class McpBridgeTests
     {
         string pipeName = Connection.NewPipeName();
         await using var server = new McpPipeServer(new FakeEditor(), pipeName);
-        server.Start();
+        await server.Start().WaitAsync(TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
         await using var run = new BridgeRun(new McpBridge(() => false, pipeName));
         var client = await run.ConnectAsync(new Implementation { Name = "claude-ai", Version = "0.14.0" });
 

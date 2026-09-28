@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Runtime.InteropServices;
 using OurCut.Media.Playback;
 using OurCut.Media.Tests.Integration;
@@ -228,6 +229,55 @@ public sealed class MpvPlayerTests(SampleMediaFixture media) : IClassFixture<Sam
 
         await WaitUntil(() => player.GetPropertyString("path") == media.Mp4 && player.LoadedPath == media.Mp4 && player.Position > 1.5);
         Assert.NotEqual("libmpv", player.GetPropertyString("current-vo"));
+        // And it goes on playing.
+        double reopened = player.Position;
+        await WaitUntil(() => player.Position > reopened + 0.2);
+        Assert.True(player.IsPlaying);
+    }
+
+    [Fact]
+    public async Task A_seek_and_play_right_after_a_renderer_is_attached_are_not_undone_by_the_reopen()
+    {
+        var player = await LoadAsync();
+        // A busy thread pool, as on a loaded CI runner: the reopen must not wait for a pool thread.
+        for (int i = 0; i < 4 * Environment.ProcessorCount; i++)
+            ThreadPool.QueueUserWorkItem(_ => Thread.Sleep(150));
+        using var renderer = new MpvSoftwareRenderer(player);
+        var pixels = Marshal.AllocHGlobal(64 * 36 * 4);
+        try
+        {
+            player.Seek(1.5);
+            player.Play();
+            await WaitUntil(() =>
+            {
+                if (renderer.HasNewFrame())
+                    renderer.Render(pixels, 64, 36, 64 * 4);
+                return player.Position > 1.6;
+            });
+            Assert.Equal("no", player.GetPropertyString("pause"));
+            Assert.InRange(double.Parse(player.GetPropertyString("time-pos")!, CultureInfo.InvariantCulture), 1.5, 10);
+        }
+        finally
+        {
+            Marshal.FreeHGlobal(pixels);
+        }
+    }
+
+    [Fact]
+    public async Task A_seek_while_the_file_loads_is_made_once_it_has_loaded()
+    {
+        media.SkipIfUnavailable();
+        Assert.SkipUnless(MpvPlayer.IsAvailable(out string? error), error ?? "");
+        _player = new MpvPlayer(new MpvPlayerOptions { AudioOutput = "null", HardwareDecoding = "no" });
+
+        var load = _player.LoadAsync(media.Mp4);
+        _player.Seek(3.0);
+        Assert.True(_player.IsSeeking);
+        await load.WaitAsync(TimeSpan.FromSeconds(20), Ct);
+
+        await WaitUntil(() => !_player.IsSeeking);
+        Assert.Equal(3.0, _player.Position, 3);
+        await WaitUntil(() => _player.GetPropertyString("time-pos") is { } t && Math.Abs(double.Parse(t, CultureInfo.InvariantCulture) - 3.0) < 0.001);
     }
 
     [Fact]
