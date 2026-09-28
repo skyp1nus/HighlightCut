@@ -304,6 +304,7 @@ public class EditorInteractionTests
 
         Assert.Equal(6, editor.Clips.Count);
         Assert.Equal(300, demo.End, 0);
+        Assert.Equal(300, editor.Time, 0);
         Assert.Equal(editor.Clips.IndexOf(demo) + 1, editor.Clips.IndexOf(editor.SelectedClip!));
     }
 

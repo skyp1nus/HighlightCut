@@ -132,7 +132,8 @@ written. Claude's exports always add a number. "After export: Show in folder" re
   size) on a background event thread, which raises `StateChanged`.
 - **Seeking** is exact (`hr-seek`). While a seek is in flight, `Position` reports the target and `IsSeeking` is
   true; only the playback restart after the newest seek settles the position, so a dragged playhead never jumps
-  back to stale positions.
+  back to stale positions. mpv can send that restart before the new `time-pos`, so the settled position stays the
+  target until mpv reports the next one (`SeekState`).
 - **Audio tracks**: the timeline's lanes map to mpv's `aid1…N`. One unmuted lane plays directly (`aid`),
   several are mixed with `lavfi-complex` (`amix`), none sets `aid=no`. Muting affects the preview only.
 - **Video** goes through the render API into OurCut's own view: `MpvOpenGlRenderer` draws into Avalonia's OpenGL
@@ -144,7 +145,9 @@ written. Claude's exports always add a number. "After export: Show in folder" re
 
 In the App, `IPlayer` is what `EditorViewModel` uses (`MpvPlaybackEngine` in the app, a fake in tests). The view
 model keeps the playhead: user moves become seeks, the player's positions come back as `Time` without seeking
-again. `VideoView` shows the video (OpenGL first, software if OpenGL is not there within two seconds or fails);
+again. On `TimelineControl` a press moves the playhead to the time under the pointer anywhere on the ruler or the
+tracks (the whole control takes the pointer, not just what it drew); it only becomes a scrub or a trim once the pointer
+has moved 4 px, so a click on a trim handle seeks and selects that clip. `VideoView` shows the video (OpenGL first, software if OpenGL is not there within two seconds or fails);
 until its first frame the thumbnail preview underneath shows through. mpv allows one render context per player and
 refuses a second one while the old exists, so the software view keeps trying for a few seconds while the OpenGL view
 it replaces lets go. `VideoView.Output` tells the editor what draws the video ("OpenGL · " and the GPU as the

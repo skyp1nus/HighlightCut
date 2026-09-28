@@ -286,7 +286,7 @@ public class SeekStateTests
     public void A_restart_left_over_from_before_a_seek_does_not_end_it()
     {
         var seeks = new SeekState();
-        long first = seeks.Request();
+        long first = seeks.Request(1);
         // The restart from loading the file is handled after the seek was asked for. (MpvPlayer used to keep a
         // separate flag that such a restart could clear while Seek set it; generations cannot be undone that way.)
         seeks.Restarted();
@@ -302,7 +302,7 @@ public class SeekStateTests
     public void Only_the_newest_of_rapid_seeks_settles()
     {
         var seeks = new SeekState();
-        long a = seeks.Request(), b = seeks.Request(), c = seeks.Request();
+        long a = seeks.Request(1), b = seeks.Request(2), c = seeks.Request(3);
         seeks.Replied(a, false);
         seeks.Restarted();
         Assert.True(seeks.IsSeeking);
@@ -316,15 +316,59 @@ public class SeekStateTests
     public void A_failed_seek_settles_without_a_restart_unless_a_newer_one_is_pending()
     {
         var seeks = new SeekState();
-        long a = seeks.Request();
+        long a = seeks.Request(1);
         seeks.Replied(a, failed: true);
         Assert.False(seeks.IsSeeking);
 
-        long b = seeks.Request(), c = seeks.Request();
+        long b = seeks.Request(2), c = seeks.Request(3);
         seeks.Replied(b, failed: true);
         Assert.True(seeks.IsSeeking);
         seeks.Replied(c, failed: false);
         seeks.Restarted();
         Assert.False(seeks.IsSeeking);
+    }
+
+    [Fact]
+    public void A_seek_that_lands_before_mpv_reports_the_new_position_keeps_the_target()
+    {
+        var seeks = new SeekState();
+        seeks.Reported(2.0);
+        long a = seeks.Request(6.2);
+        // Playing: mpv reports the position it had before it got to the seek.
+        seeks.Reported(2.04);
+        Assert.Equal(6.2, seeks.Position);
+
+        seeks.Replied(a, failed: false);
+        seeks.Restarted();
+        Assert.False(seeks.IsSeeking);
+        Assert.Equal(6.2, seeks.Position);
+
+        seeks.Reported(6.24);
+        Assert.Equal(6.24, seeks.Position);
+    }
+
+    [Fact]
+    public void A_restart_that_ends_no_seek_keeps_the_reported_position()
+    {
+        var seeks = new SeekState();
+        long a = seeks.Request(2.0);
+        seeks.Replied(a, failed: false);
+        seeks.Restarted();
+        seeks.Reported(5.0);
+
+        // A new audio mix restarts playback too.
+        seeks.Restarted();
+        Assert.Equal(5.0, seeks.Position);
+    }
+
+    [Fact]
+    public void A_failed_seek_keeps_the_reported_position()
+    {
+        var seeks = new SeekState();
+        seeks.Reported(3.0);
+        long a = seeks.Request(8.0);
+        seeks.Replied(a, failed: true);
+        seeks.Restarted();
+        Assert.Equal(3.0, seeks.Position);
     }
 }
