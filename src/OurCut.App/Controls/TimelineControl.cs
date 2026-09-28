@@ -3,6 +3,7 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Media;
+using Avalonia.Rendering;
 using Avalonia.Threading;
 using OurCut.App.Services;
 using OurCut.App.ViewModels;
@@ -17,7 +18,7 @@ namespace OurCut.App.Controls;
 /// Layout follows design/project/OurCut.dc.html: ruler 22 px, video track 64 px, transcript lane 20 px,
 /// audio track 72 px.
 /// </summary>
-public sealed class TimelineControl : Control
+public sealed class TimelineControl : Control, ICustomHitTest
 {
     public static readonly StyledProperty<EditorViewModel?> EditorProperty =
         AvaloniaProperty.Register<TimelineControl, EditorViewModel?>(nameof(Editor));
@@ -47,6 +48,9 @@ public sealed class TimelineControl : Control
     private const double KeyframeTickHeight = 5;
     private const double SnapPixels = 8;
 
+    /// <summary>How far the pointer moves before a press becomes a drag; less is a click, which must not trim or scrub.</summary>
+    private const double DragPixels = 4;
+
     /// <summary>Thumbnails in the strip at 1× (the prototype's 13 frames).</summary>
     private const int FramesAtFit = 13;
 
@@ -68,6 +72,7 @@ public sealed class TimelineControl : Control
     private static readonly IBrush SceneLine = White(0.16);
     private static readonly IBrush TrackLine = White(0.05);
     private static readonly IBrush FrameGap = new SolidColorBrush(Color.Parse("#0B0C0E"));
+    private static readonly IBrush PlainTrack = new SolidColorBrush(Color.Parse("#16171A"));
     private static readonly IBrush KeyframeTick = White(0.3);
     private static readonly IBrush AudioBg = new SolidColorBrush(Color.Parse("#101113"));
     private static readonly IBrush SilenceHatch = White(0.05);
@@ -148,6 +153,9 @@ public sealed class TimelineControl : Control
     private double Duration => _editor?.Duration ?? 0;
     private double Inner => Math.Max(Bounds.Width, Bounds.Width * Zoom);
     private double Pps => Duration > 0 ? Inner / Duration : 0;
+
+    /// <summary>The scroll offset as drawn: input maps the pointer through the same value.</summary>
+    private double Scroll => Math.Clamp(ScrollOffset, 0, MaxScroll);
     private double X(double t) => Duration > 0 ? t / Duration * Inner : 0;
     private double T(double x) => Inner > 0 ? x / Inner * Duration : 0;
 
@@ -284,7 +292,7 @@ public sealed class TimelineControl : Control
             return;
         UpdatePulse();
 
-        double scroll = Math.Clamp(ScrollOffset, 0, MaxScroll);
+        double scroll = Scroll;
         var visible = new Rect(scroll, 0, Bounds.Width, Bounds.Height);
         using var _ = context.PushTransform(Matrix.CreateTranslation(-scroll, 0));
 
@@ -411,14 +419,11 @@ public sealed class TimelineControl : Control
         var track = new Rect(0, VideoTop, w, VideoHeight);
         using (ctx.PushClip(track))
         {
-            int n = Math.Max(1, (int)Math.Round(FramesAtFit * Zoom));
-            double fw = w / n;
-            for (int i = (int)Math.Max(0, Math.Floor(visible.Left / fw)); i < n && i * fw < visible.Right; i++)
-            {
-                var r = new Rect(i * fw, VideoTop, fw, VideoHeight);
-                media.DrawFrame(ctx, r, (i + 0.5) / n * Duration, FrameLook.Thumbnail, i);
-                ctx.FillRectangle(FrameGap, new Rect(Math.Round(r.Right) - 1, r.Y, 1, r.Height));
-            }
+            // Frames chip off: a plain strip of the same height, with everything else on it as before.
+            if (!editor.ShowFrames)
+                ctx.FillRectangle(PlainTrack, new Rect(visible.Left, VideoTop, visible.Width, VideoHeight));
+            else
+                DrawThumbnails(ctx, media, visible, w);
 
             if (editor.ShowKeyframes)
                 DrawKeyframes(ctx, media, visible);
@@ -429,6 +434,19 @@ public sealed class TimelineControl : Control
             }
         }
         ctx.FillRectangle(TrackLine, new Rect(visible.Left, VideoTop, visible.Width, 1));
+    }
+
+    /// <summary>A row of thumbnails across the video track, more of them as it zooms in.</summary>
+    private void DrawThumbnails(DrawingContext ctx, IMediaPreview media, Rect visible, double w)
+    {
+        int n = Math.Max(1, (int)Math.Round(FramesAtFit * Zoom));
+        double fw = w / n;
+        for (int i = (int)Math.Max(0, Math.Floor(visible.Left / fw)); i < n && i * fw < visible.Right; i++)
+        {
+            var r = new Rect(i * fw, VideoTop, fw, VideoHeight);
+            media.DrawFrame(ctx, r, (i + 0.5) / n * Duration, FrameLook.Thumbnail, i);
+            ctx.FillRectangle(FrameGap, new Rect(Math.Round(r.Right) - 1, r.Y, 1, r.Height));
+        }
     }
 
     /// <summary>Hairline ticks along the top of the video track where lossless cuts can start.</summary>
@@ -744,9 +762,15 @@ public sealed class TimelineControl : Control
 
     // ---- Input ---------------------------------------------------------------------------
 
+    /// <summary>
+    /// The whole control takes the pointer. Avalonia otherwise hits only what was drawn, and a click between the
+    /// ruler's ticks or on an empty stretch of a track went to whatever lies underneath.
+    /// </summary>
+    bool ICustomHitTest.HitTest(Point point) => new Rect(Bounds.Size).Contains(point);
+
     private HitRegion? HitTest(Point p)
     {
-        var content = new Point(p.X + ScrollOffset, p.Y);
+        var content = new Point(p.X + Scroll, p.Y);
         // Handles first (they overhang the segments), then segments, the selected one on top.
         return _hits.LastOrDefault(h => h.Kind is HitKind.TrimIn or HitKind.TrimOut && h.Rect.Contains(content))
                ?? _hits.LastOrDefault(h => h.Kind == HitKind.Segment && h.Rect.Contains(content));
@@ -759,12 +783,12 @@ public sealed class TimelineControl : Control
         if (editor is null || !editor.HasFile || !e.GetCurrentPoint(this).Properties.IsLeftButtonPressed)
             return;
         var p = e.GetPosition(this);
-        double t = Math.Clamp(T(p.X + ScrollOffset), 0, Duration);
+        double t = Math.Clamp(T(p.X + Scroll), 0, Duration);
         var hit = HitTest(p);
         if (InLane(p) && hit?.Kind is not (HitKind.TrimIn or HitKind.TrimOut))
         {
             // The lane never splits or trims: a word moves the playhead to it, anywhere else scrubs.
-            int word = LaneWordAt(new Point(p.X + ScrollOffset, p.Y));
+            int word = LaneWordAt(new Point(p.X + Scroll, p.Y));
             if (word >= 0)
             {
                 editor.TranscriptPanel.SeekToWord(word);
@@ -782,8 +806,11 @@ public sealed class TimelineControl : Control
         }
         else if (hit?.Kind is HitKind.TrimIn or HitKind.TrimOut && editor.Tool == TimelineTool.Select)
         {
+            // The handles overhang the clip's edge, so a click on one is still a click on the timeline: it moves
+            // the playhead there and selects the handle's clip. Only a drag trims.
             _drag = new Drag(hit.Kind == HitKind.TrimIn ? DragKind.TrimIn : DragKind.TrimOut, hit.Clip,
                 p.X, hit.Kind == HitKind.TrimIn ? hit.Clip!.Start : hit.Clip!.End, Guid.NewGuid().ToString("N"));
+            editor.ScrubTo(t, select: false);
             editor.Select(hit.Clip);
             e.Pointer.Capture(this);
         }
@@ -804,10 +831,17 @@ public sealed class TimelineControl : Control
         var p = e.GetPosition(this);
         if (editor is null)
             return;
+        if (_drag.Kind != DragKind.None && !_drag.Moved)
+        {
+            // A hand that shakes while clicking leaves the playhead where it was put.
+            if (Math.Abs(p.X - _drag.StartX) < DragPixels)
+                return;
+            _drag = _drag with { Moved = true };
+        }
         switch (_drag.Kind)
         {
             case DragKind.Scrub:
-                editor.ScrubTo(T(p.X + ScrollOffset), select: false);
+                editor.ScrubTo(T(p.X + Scroll), select: false);
                 return;
             case DragKind.TrimIn or DragKind.TrimOut:
                 double v = _drag.Origin + (p.X - _drag.StartX) / Pps;
@@ -820,7 +854,7 @@ public sealed class TimelineControl : Control
         var hit = editor.HasFile ? HitTest(p) : null;
         if (InLane(p) && hit?.Kind is not (HitKind.TrimIn or HitKind.TrimOut))
         {
-            Cursor = LaneWordAt(new Point(p.X + ScrollOffset, p.Y)) >= 0 ? new Cursor(StandardCursorType.Hand) : Cursor.Default;
+            Cursor = LaneWordAt(new Point(p.X + Scroll, p.Y)) >= 0 ? new Cursor(StandardCursorType.Hand) : Cursor.Default;
             return;
         }
         Cursor = editor.Tool == TimelineTool.Split && hit is not null && p.Y > RulerHeight ? new Cursor(StandardCursorType.Cross)
@@ -876,7 +910,9 @@ public sealed class TimelineControl : Control
     }
 
     /// <param name="MergeKey">Groups all trim steps of one drag into a single undo step.</param>
-    private readonly record struct Drag(DragKind Kind, ClipViewModel? Clip, double StartX, double Origin, string? MergeKey);
+    /// <param name="Moved">The pointer went <see cref="DragPixels"/> from the press: a drag, no longer a click.</param>
+    private readonly record struct Drag(DragKind Kind, ClipViewModel? Clip, double StartX, double Origin, string? MergeKey,
+        bool Moved = false);
 
     private enum HitKind
     {

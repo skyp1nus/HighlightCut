@@ -82,10 +82,19 @@ single right answer, so the command refuses with an `EditException` and the UI s
   peaks above −45 dBFS) and the volumes that bring the streams to the average of their levels, a boost never passing
   0 dBFS at the loudest peak. The editor's "Even out all tracks" uses it.
 
-In the App, `FfmpegMediaOpener` probes a file and creates a `MediaPreview`, which runs the three analyses in
+In the App, `FfmpegMediaOpener` probes a file and creates a `MediaPreview`, which runs the analyses in
 parallel (or reads them from the cache) and raises `Changed` as results arrive; the timeline redraws, and the
 keyframes are handed to the editing session for snapping. How long each part took, or that it came from the cache,
 is in Copy diagnostics ("Analysis keyframes 0.2 s · thumbnails 0.3 s · …").
+
+Keyframes (needed for lossless cuts) and the waveform are always read. Thumbnails are made only while the timeline's
+Frames chip is on (off at first: the player shows the picture anyway, and without them a 10-minute 1080p file opens in
+about 1.4 s instead of 2.1 s). The editor asks for them as it loads the file (`MediaPreview.ExtractThumbnails`), so
+they are then part of opening it: the processing screen and its progress include "Making thumbnails". Turned on later,
+the open file's are made in the background (status bar: "making thumbnails 40%"), or read from the cache at once.
+Turned off, a run under way stops (`StopThumbnails`) and keeps nothing of it, nothing cached; a finished set is kept
+in memory, only not drawn. With the chip off the video track is a plain strip of the same height, keyframe ticks and
+scene markers on it as before, and without thumbnails the player shows black until mpv's first frame.
 
 While that runs for more than 0.4 s, a processing screen covers the editor below the title bar (`ProcessingOverlay`,
 design "OurCut — екран обробки", X1): a slowly changing blob (`BlobView`, drawn every frame while shown), the file,
@@ -149,7 +158,8 @@ written. Claude's exports always add a number. "After export: Show in folder" re
   size) on a background event thread, which raises `StateChanged`.
 - **Seeking** is exact (`hr-seek`). While a seek is in flight, `Position` reports the target and `IsSeeking` is
   true; only the playback restart after the newest seek settles the position, so a dragged playhead never jumps
-  back to stale positions.
+  back to stale positions. mpv can send that restart before the new `time-pos`, so the settled position stays the
+  target until mpv reports the next one (`SeekState`).
 - **Audio tracks**: the timeline's lanes map to mpv's `aid1…N` (`AudioMix`). One unmuted lane at 0 dB plays
   directly (`aid`), none sets `aid=no`; anything else goes through `lavfi-complex`: a `volume` filter on each lane
   whose volume is not 0 dB, then `amix` (`normalize=0`) when there are several, e.g.
@@ -166,8 +176,10 @@ written. Claude's exports always add a number. "After export: Show in folder" re
 
 In the App, `IPlayer` is what `EditorViewModel` uses (`MpvPlaybackEngine` in the app, a fake in tests). The view
 model keeps the playhead: user moves become seeks, the player's positions come back as `Time` without seeking
-again. `VideoView` shows the video (OpenGL first, software if OpenGL is not there within two seconds or fails);
-until its first frame the thumbnail preview underneath shows through. mpv allows one render context per player and
+again. On `TimelineControl` a press moves the playhead to the time under the pointer anywhere on the ruler or the
+tracks (the whole control takes the pointer, not just what it drew); it only becomes a scrub or a trim once the pointer
+has moved 4 px, so a click on a trim handle seeks and selects that clip. `VideoView` shows the video (OpenGL first, software if OpenGL is not there within two seconds or fails);
+until its first frame the thumbnail preview underneath shows through (black if no thumbnails were made). mpv allows one render context per player and
 refuses a second one while the old exists, so the software view keeps trying for a few seconds while the OpenGL view
 it replaces lets go. `VideoView.Output` tells the editor what draws the video ("OpenGL · " and the GPU as the
 driver names it, "software", or "none: why", which puts a message in the status bar rather than leaving blurry
@@ -302,7 +314,7 @@ bind to view models and never change the project themselves.
   source-generated JSON, enums by name (`LenientEnumConverter`). A section missing from the file (an older version
   wrote it, or it is at its defaults) reads as null and means the defaults; a value this version does not know falls
   back to its default, and the rest of the file is kept.
-  `Timeline` is the timeline toolbar's chips (Keyframes, Silence, Scenes, Snap), saved as they are clicked and put
+  `Timeline` is the timeline toolbar's chips (Frames, Keyframes, Silence, Scenes, Snap), saved as they are clicked and put
   back for every project and run (`SettingsViewModel.ApplyTimeline`); the design's screens show them all and save none.
   Playback is read before the player is created, which starts with the saved decoding and audio device. Changes apply
   while it plays: `IPlayer.SetHardwareDecoding` (mpv `hwdec`), `SetAudioDevice` (`audio-device`, one of
