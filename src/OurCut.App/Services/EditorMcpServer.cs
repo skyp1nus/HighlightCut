@@ -46,7 +46,7 @@ public sealed class EditorMcpServer : IAsyncDisposable
         var server = new McpPipeServer(_host, _pipeName) { OwnerLabel = OwnerLabel };
         server.StateChanged += (_, _) => Dispatcher.UIThread.Post(Refresh);
         _server = server;
-        server.Start();
+        _ = server.Start();
     }
 
     private void OnClaudeChanged(object? sender, PropertyChangedEventArgs e)
