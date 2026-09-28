@@ -106,6 +106,12 @@ public sealed class WaveformData
 
     public static double ToDisplay(double linear) =>
         linear <= 0 ? 0 : Math.Clamp(1 + 20 * Math.Log10(linear) / 48, 0, 1);
+
+    /// <summary>A display height (<see cref="ToDisplay"/>) as it looks with the track's volume changed by <paramref name="gainDb"/>.</summary>
+    public static double WithGain(double display, double gainDb) =>
+        display <= 0 || gainDb == 0 ? display
+        : gainDb <= OurCut.Core.Model.TrackMix.MinGainDb ? 0
+        : Math.Clamp(display + gainDb / 48, 0, 1);
 }
 
 /// <summary>

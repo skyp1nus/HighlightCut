@@ -682,6 +682,8 @@ public sealed class MediaPreview : IMediaPreview, IDisposable
 
     public double AudioPeak(int stream, double startTime, double endTime) => Waveform.Peak(stream, startTime, endTime);
 
+    public AudioLevel? MeasureAudio(int stream) => Waveform.IsComplete ? AudioLevels.Measure(Waveform, stream) : null;
+
     public void DrawFrame(DrawingContext context, Rect rect, double time, FrameLook look, int variant)
     {
         Bitmap? bitmap;

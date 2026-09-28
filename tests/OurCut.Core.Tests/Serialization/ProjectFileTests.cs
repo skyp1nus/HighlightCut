@@ -76,6 +76,52 @@ public class ProjectFileTests
         Assert.Throws<ProjectFileException>(() => ProjectFile.Deserialize(json));
 
     [Fact]
+    public void Track_volume_and_mute_are_saved_with_their_stream()
+    {
+        var project = Sample.Project.WithMix(new TrackMix(2, -6.5, IsMuted: true)).WithMix(new TrackMix(3, 4));
+        string json = ProjectFile.Serialize(project);
+        Assert.Contains("\"gainDb\": -6.5", json, StringComparison.Ordinal);
+        Assert.Contains("\"muted\": true", json, StringComparison.Ordinal);
+        // Tracks at the default (Mic) are written as before.
+        Assert.Equal(2, json.Split("gainDb").Length - 1);
+        Assert.Equal(1, json.Split("muted").Length - 1);
+
+        var back = ProjectFile.Deserialize(json);
+        Assert.Equal([new TrackMix(2, -6.5, true), new TrackMix(3, 4)], back.AudioMix);
+        Assert.Equal(new TrackMix(1), back.MixOf(1));
+    }
+
+    [Fact]
+    public void Files_from_before_track_volumes_play_every_track_at_0_dB()
+    {
+        const string json = """
+            {
+              "format": "ourcut-project", "version": 1,
+              "source": { "path": "/v/a.mp4", "duration": 10, "frameRate": 30,
+                          "audioStreams": [ { "index": 1, "label": "Mic" }, { "index": 2, "label": "Game" } ] },
+              "clips": []
+            }
+            """;
+        var p = ProjectFile.Deserialize(json);
+        Assert.Empty(p.AudioMix);
+        Assert.Equal(0, p.MixOf(2).GainDb);
+    }
+
+    [Fact]
+    public void Saved_volumes_are_kept_in_range()
+    {
+        const string json = """
+            {
+              "format": "ourcut-project", "version": 1,
+              "source": { "path": "/v/a.mp4", "duration": 10, "frameRate": 30,
+                          "audioStreams": [ { "index": 1, "gainDb": 99 }, { "index": 2, "gainDb": "-Infinity" } ] }
+            }
+            """;
+        var p = ProjectFile.Deserialize(json);
+        Assert.Equal([new TrackMix(1, TrackMix.MaxGainDb), new TrackMix(2, TrackMix.MinGainDb)], p.AudioMix);
+    }
+
+    [Fact]
     public void Unknown_fields_and_missing_optional_ones_are_tolerated()
     {
         const string json = """

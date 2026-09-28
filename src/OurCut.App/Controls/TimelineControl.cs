@@ -7,6 +7,7 @@ using Avalonia.Rendering;
 using Avalonia.Threading;
 using OurCut.App.Services;
 using OurCut.App.ViewModels;
+using OurCut.Media.Previews;
 
 namespace OurCut.App.Controls;
 
@@ -512,6 +513,8 @@ public sealed class TimelineControl : Control, ICustomHitTest
                 break;
             double top = AudioTop + 6 + lane * laneHeight;
             using var fade = ctx.PushOpacity(lane < editor.AudioLanes.Count && editor.AudioLanes[lane].IsMuted ? 0.3 : 1);
+            // Drawn as it will sound: the lane's volume moves the bars up or down the dB scale.
+            double gainDb = lane < editor.AudioLanes.Count ? editor.AudioLanes[lane].GainDb : 0;
             // Hundreds of bars a lane: one shape for those in a clip and one for the rest, rather than a draw call each.
             var barsIn = new StreamGeometry();
             var barsOut = new StreamGeometry();
@@ -524,7 +527,7 @@ public sealed class TimelineControl : Control, ICustomHitTest
                     if (x > visible.Right)
                         break;
                     double t0 = k * Duration / count, t1 = (k + 1) * Duration / count;
-                    double level = media.AudioPeak(lane, t0, t1);
+                    double level = WaveformData.WithGain(media.AudioPeak(lane, t0, t1), gainDb);
                     double h = Math.Round(level * 1000) / 1000 * laneHeight;
                     if (h <= 0)
                         continue;

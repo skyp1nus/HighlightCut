@@ -21,4 +21,13 @@ public static class FfmpegText
             throw new ArgumentOutOfRangeException(nameof(seconds), seconds, "Time must be a finite number.");
         return Math.Max(0, seconds).ToString("0.000000", CultureInfo.InvariantCulture);
     }
+
+    /// <summary>
+    /// libavfilter's <c>volume</c> filter for a gain in dB, e.g. <c>volume=-6dB</c>; <c>volume=0</c> at
+    /// <see cref="OurCut.Core.Model.TrackMix.MinGainDb"/> and below, which means silent.
+    /// </summary>
+    public static string VolumeFilter(double gainDb) =>
+        gainDb <= OurCut.Core.Model.TrackMix.MinGainDb
+            ? "volume=0"
+            : "volume=" + gainDb.ToString("0.##", CultureInfo.InvariantCulture) + "dB";
 }

@@ -140,6 +140,9 @@ public interface IMediaPreview
     /// <summary>Peak level 0..1 of an audio stream between two source times.</summary>
     double AudioPeak(int stream, double startTime, double endTime);
 
+    /// <summary>How loud an audio stream is over the whole file; null until all the audio has been read, or if it is silent.</summary>
+    AudioLevel? MeasureAudio(int stream) => null;
+
     /// <summary>Draws the frame at <paramref name="time"/> into <paramref name="rect"/>.</summary>
     /// <param name="variant">Stable per-thumbnail number, used by the demo to vary placeholder shading.</param>
     void DrawFrame(DrawingContext context, Rect rect, double time, FrameLook look, int variant);

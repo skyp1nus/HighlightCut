@@ -202,4 +202,35 @@ public class HistoryIdTests
         Assert.Same(a, session.History.Find(1));
         Assert.Null(session.History.Find(2));
     }
+
+    [Fact]
+    public void Track_volume_is_not_an_edit_and_undo_keeps_it()
+    {
+        var s = new EditorSession(Sample.Project);
+        var kinds = new List<ProjectChangeKind>();
+        s.Changed += (_, e) => kinds.Add(e.Kind);
+        s.SetIncluded(3, false);
+
+        Assert.True(s.SetTrackMix(new TrackMix(2, -6)));
+        Assert.False(s.SetTrackMix(new TrackMix(2, -6)));
+        Assert.Equal(1, s.History.Position);
+        Assert.Equal(ProjectChangeKind.Mixed, kinds[^1]);
+
+        Assert.True(s.Undo());
+        Assert.True(s.Project.Get(3).IsIncluded);
+        Assert.Equal(-6, s.Project.MixOf(2).GainDb);
+        Assert.True(s.Redo());
+        Assert.Equal(-6, s.Project.MixOf(2).GainDb);
+    }
+
+    [Fact]
+    public void Track_volume_is_clamped_and_a_default_mix_is_dropped()
+    {
+        var s = new EditorSession(Sample.Project);
+        s.SetTrackMix(new TrackMix(1, 30.04, IsMuted: true));
+        Assert.Equal(new TrackMix(1, TrackMix.MaxGainDb, true), Assert.Single(s.Project.AudioMix));
+
+        s.SetTrackMix(new TrackMix(1));
+        Assert.Empty(s.Project.AudioMix);
+    }
 }

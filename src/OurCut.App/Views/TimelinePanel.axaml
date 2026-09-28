@@ -107,7 +107,7 @@
         </Grid>
       </Border>
 
-      <Grid Grid.Row="1" ColumnDefinitions="44,*">
+      <Grid Grid.Row="1" ColumnDefinitions="112,*">
         <!-- Track names. -->
         <Border BorderBrush="{StaticResource DividerSoftBrush}" BorderThickness="0,0,1,0">
           <Grid RowDefinitions="22,64,Auto,72,*">
@@ -121,13 +121,36 @@
             <Border Grid.Row="3" BorderBrush="{StaticResource DividerSoftBrush}" BorderThickness="0,1,0,0">
               <Panel>
               <TextBlock Classes="track" Text="A1" IsVisible="{Binding !AudioLanes.Count}" />
-              <ItemsControl ItemsSource="{Binding AudioLanes}" VerticalAlignment="Center">
+              <!-- One row per lane, as tall as its waveform lane (the track less 6 px above and below). -->
+              <ItemsControl ItemsSource="{Binding AudioLanes}" Margin="0,6">
+                <ItemsControl.ItemsPanel>
+                  <ItemsPanelTemplate>
+                    <UniformGrid Columns="1" />
+                  </ItemsPanelTemplate>
+                </ItemsControl.ItemsPanel>
                 <ItemsControl.ItemTemplate>
                   <DataTemplate x:DataType="vm:AudioLaneViewModel">
-                    <Button Classes="track" Classes.muted="{Binding IsMuted}" HorizontalAlignment="Stretch" Height="20"
-                            ToolTip.Tip="{Binding MuteTip}" Command="{Binding ToggleMuteCommand}">
-                      <TextBlock Classes="mono" Text="{Binding Key}" FontSize="10" FontWeight="Medium" />
-                    </Button>
+                    <!-- Mute, volume slider, volume in dB. -->
+                    <Grid Classes="lane" Classes.muted="{Binding IsMuted}" ColumnDefinitions="26,*,40" Height="20"
+                          VerticalAlignment="Center" Background="Transparent">
+                      <Grid.ContextMenu>
+                        <ContextMenu>
+                          <MenuItem Header="Reset volume" Command="{Binding ResetVolumeCommand}" />
+                          <MenuItem Header="Even out all tracks" Command="{Binding EvenOutCommand}" />
+                        </ContextMenu>
+                      </Grid.ContextMenu>
+                      <Button Classes="track" Classes.muted="{Binding IsMuted}" HorizontalAlignment="Stretch" Height="20"
+                              ToolTip.Tip="{Binding MuteTip}" Command="{Binding ToggleMuteCommand}">
+                        <TextBlock Classes="mono" Text="{Binding Key}" FontSize="10" FontWeight="Medium" />
+                      </Button>
+                      <Slider Grid.Column="1" Classes="gain" Theme="{StaticResource VolumeSlider}" Margin="5,0,3,0" ClipToBounds="False"
+                              Minimum="-40" Maximum="12" TickFrequency="0.5" IsSnapToTickEnabled="True"
+                              Value="{Binding GainDb}" VerticalAlignment="Center" ToolTip.Tip="{Binding VolumeTip}"
+                              DoubleTapped="OnVolumeDoubleTapped" PointerWheelChanged="OnVolumeWheel" />
+                      <TextBlock Grid.Column="2" Classes="mono gain" Text="{Binding GainText}" FontSize="10" TextAlignment="Right"
+                                 VerticalAlignment="Center" Margin="0,0,8,0" Background="Transparent" ToolTip.Tip="{Binding VolumeTip}"
+                                 DoubleTapped="OnVolumeDoubleTapped" PointerWheelChanged="OnVolumeWheel" />
+                    </Grid>
                   </DataTemplate>
                 </ItemsControl.ItemTemplate>
               </ItemsControl>
@@ -200,6 +223,13 @@
     </Style>
     <Style Selector="Button.track.muted">
       <Setter Property="Foreground" Value="{StaticResource Muted3Brush}" />
+    </Style>
+    <Style Selector="TextBlock.gain">
+      <Setter Property="Foreground" Value="{StaticResource MutedBrush}" />
+    </Style>
+    <!-- A muted lane's volume is kept but not heard: dimmed like its waveform. -->
+    <Style Selector="Grid.lane.muted Slider.gain, Grid.lane.muted TextBlock.gain">
+      <Setter Property="Opacity" Value="0.3" />
     </Style>
   </UserControl.Styles>
 </UserControl>

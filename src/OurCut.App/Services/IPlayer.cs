@@ -37,8 +37,11 @@ public interface IPlayer : IDisposable
 
     void SetSpeed(double speed);
 
-    /// <summary>Which audio tracks are heard (one entry per track, in the file's order); muting is preview only.</summary>
-    void SetAudioTracks(IReadOnlyList<bool> enabled);
+    /// <summary>
+    /// Which audio tracks are heard and how loud (one entry per track, in the file's order): <paramref name="gainsDb"/>
+    /// is each track's volume in dB.
+    /// </summary>
+    void SetAudioTracks(IReadOnlyList<bool> enabled, IReadOnlyList<double> gainsDb);
 
     /// <summary>The audio outputs the system has now; empty when they cannot be listed.</summary>
     IReadOnlyList<AudioOutputDevice> AudioDevices();
@@ -96,7 +99,7 @@ public sealed class MpvPlaybackEngine : IPlayer
     public void StepFrame(bool forward) => Mpv.StepFrame(forward);
     public void SetVolume(double volume) => Mpv.SetVolume(volume);
     public void SetSpeed(double speed) => Mpv.SetSpeed(speed);
-    public void SetAudioTracks(IReadOnlyList<bool> enabled) => Mpv.SetAudioTracks(enabled);
+    public void SetAudioTracks(IReadOnlyList<bool> enabled, IReadOnlyList<double> gainsDb) => Mpv.SetAudioTracks(enabled, gainsDb);
     public IReadOnlyList<AudioOutputDevice> AudioDevices() => Mpv.AudioDevices();
     public void SetAudioDevice(string? name) => Mpv.SetAudioDevice(name);
     public void SetHardwareDecoding(HardwareDecodingMode mode) => Mpv.SetHardwareDecoding(PlaybackSettings.MpvHardwareDecoding(mode));
