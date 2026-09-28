@@ -38,12 +38,41 @@ The session is not thread-safe. The MCP server runs every tool call on the UI th
 | `SetClipIncludedCommand` | `set_included` | Excludes a clip from the export or keeps it again |
 | `MoveClipCommand` | `move_segment` | Moves a clip to another output position |
 | `RenameClipCommand` | `set_label` | Renames a clip |
+| `JoinClipsCommand` | `join_segments` | Joins a clip with the next one on the source timeline into one clip |
 | `BatchCommand` | any | Several commands as one undo step |
 | `RevertEditCommand` | `revert_action` | Reverts one earlier edit and keeps the edits made after it |
 | `CutRangesCommand` | `cut_silences`, `cut_ranges`, `cut_filler_words` | Cuts source ranges out of the clips they touch, splitting them |
 
-`EditorSession` wraps these with UI-friendly helpers (`Trim` clamps and snaps to keyframes, `KeepRange`
-inserts by source position, `Split` returns the new clip).
+`EditorSession` wraps these with UI-friendly helpers (`Trim` clamps and snaps, `KeepRange` inserts by source
+position, `Split` returns the new clip, `JoinWithNext` finds the clip to join).
+
+### Clips never share source time
+
+Two clips over the same seconds would put them in the export twice, so no edit may make clips overlap, whether they
+are included or not (an excluded clip can be kept again at any time). Touching is fine: one clip's out-point may equal
+the next one's in-point (`Project.OverlapTolerance`, a microsecond, absorbs rounding in times from elsewhere).
+
+- **Commands refuse.** `AddClipCommand` refuses a range another clip covers; `SetClipRangeCommand` checks only the
+  time a clip gains, so it may always shrink. The message names the clip in the way and both ranges. Split and
+  `CutRangesCommand` only ever cut inside a clip. As a backstop for everything else (`BatchCommand`, `RevertEditCommand`
+  when a later edit took the time back, commands to come), `EditorSession.Execute` refuses any edit after which more
+  source time is covered twice than before (`EditRules.ValidateNoNewOverlap`).
+- **Session helpers clamp.** `Trim` stops an end at the neighbour's edge (`Project.TrimLimit`) and, within the snap
+  distance, snaps onto it: the magnet. The neighbour's edge wins over a keyframe; keyframes are only snapped to with
+  the Snap chip on, the magnet always. `KeepRange` ("+ Keep", "Keep as clip") takes the free part of the range
+  (`Project.FreeRange`: from where a covering clip ends to where the next begins) and refuses when nothing is left
+  ("That is already in clip 3."). I and O trim like the handles; I with nothing selected starts a clip of up to 10 s
+  that stops at the next clip, and says which clip to select when the playhead is inside one.
+- **Joining.** `JoinClipsCommand(first, second)` gives the first clip the second's out-point and removes the second, in
+  one undo step. The joined clip keeps the first clip's id, name and inclusion, at the earlier of the two output
+  positions. The two must be next to each other in the output and touch, or be less than `EditRules.JoinGap` (0.5 s)
+  apart: a few frames missed while trimming, which the join then keeps. A longer gap is a cut someone meant, so it is
+  refused with the distance. Overlapping clips of an old project can always be joined, which is how to tidy them up.
+- **Old projects.** Files saved before this rule may have overlapping clips; they open as they are (with a status
+  message naming a pair), and edits may shrink those overlaps but not grow them. The export never plays a second
+  twice: `Project.OutputParts()` is what is exported, each included clip in output order less the seconds an earlier
+  one already has (a clip inside an earlier one is left out; one around it is split in two). `OutputDuration` and
+  the export plan both use it.
 
 `Revert(entry)` is the Undo on a single card in the Claude panel. Unlike `Undo`, which steps back through the
 history, it applies a `RevertEditCommand`: the clips that edit added, removed, changed or reordered go back to how
@@ -113,6 +142,10 @@ presentation time, so a value just after the keyframe works. Matroska and most o
 their cut points are marked approximate.
 
 ffmpeg ends a stream copy by decode time, so with B-frames each clip comes out a few frames longer than planned.
+Clips that follow on in the source as well as in the output (one's out-point is the next one's in-point) are cut
+as one stretch in a merged lossless export (`ExportPlanner.JoinTouching`): cut separately, the second would start at
+the keyframe before the join and play those frames twice. They then share one chapter, the first clip's. Separate
+files and re-encoded exports cut exactly, so they keep one cut per clip.
 A merged lossless export cuts every clip to a temporary file and joins them with the concat demuxer; chapters are
 written afterwards from the real length of each cut, so they start exactly where their clip does.
 
@@ -178,7 +211,10 @@ In the App, `IPlayer` is what `EditorViewModel` uses (`MpvPlaybackEngine` in the
 model keeps the playhead: user moves become seeks, the player's positions come back as `Time` without seeking
 again. On `TimelineControl` a press moves the playhead to the time under the pointer anywhere on the ruler or the
 tracks (the whole control takes the pointer, not just what it drew); it only becomes a scrub or a trim once the pointer
-has moved 4 px, so a click on a trim handle seeks and selects that clip. `VideoView` shows the video (OpenGL first, software if OpenGL is not there within two seconds or fails);
+has moved 4 px, so a click on a trim handle seeks and selects that clip. A dragged handle stops at the neighbouring
+clip and, within 8 px, snaps onto its edge (Alt drags freely); while it touches, a light line marks the join. A
+right-click selects the clip under the pointer for the timeline's context menu (exclude, split, join with next,
+delete), the same as the clip list's; J joins the selected clip with the next. `VideoView` shows the video (OpenGL first, software if OpenGL is not there within two seconds or fails);
 until its first frame the thumbnail preview underneath shows through (black if no thumbnails were made). mpv allows one render context per player and
 refuses a second one while the old exists, so the software view keeps trying for a few seconds while the OpenGL view
 it replaces lets go. `VideoView.Output` tells the editor what draws the video ("OpenGL · " and the GPU as the
@@ -246,8 +282,8 @@ Claude ──stdio──> OurCut.exe mcp (McpBridge) ──named pipe──> Our
 | `search_transcript`, `find_filler_words` | Where a word or phrase (case and punctuation ignored), or the user's filler words (Settings → Transcription), are said |
 | `cut_ranges`, `cut_filler_words` | Cut any source ranges (e.g. from the transcript), or the filler words, out of the clips as one undo step |
 | `list_videos` | Video files in a folder, newest first |
-| `add_segment`, `remove_segment`, `trim_segment`, `split_segment`, `set_included`, `move_segment`, `set_label` | One edit each (the commands above) |
-| `edit_timeline` | Several edits as one undo step, all or nothing |
+| `add_segment`, `remove_segment`, `trim_segment`, `split_segment`, `join_segments`, `set_included`, `move_segment`, `set_label` | One edit each (the commands above); a range or trim over another clip is refused |
+| `edit_timeline` | Several edits as one undo step, all or nothing (actions add, remove, trim, split, join, include, exclude, move, rename) |
 | `revert_action`, `undo`, `redo` | Take edits back |
 | `seek`, `set_playing` | Show a frame or play |
 | `open_file`, `save_project` | Open a video or project; save as `.ourcut.json` (full paths only); the user may be asked first |

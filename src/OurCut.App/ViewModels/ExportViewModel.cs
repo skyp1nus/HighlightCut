@@ -430,7 +430,7 @@ public sealed partial class ExportViewModel : ViewModelBase
         OutputFolder, ModeCardTitle, Container, Included.Count, Total, Merge);
 
     private List<ClipViewModel> Included => [.. _editor.Clips.Where(c => c.IsIncluded)];
-    private double Total => Included.Sum(c => c.Duration);
+    private double Total => _editor.OutputDuration;
     private double Speed => Mode switch { ExportMode.Copy => 62, ExportMode.Smart => 18, _ => 1.4 };
     private double SizeGb => Total * (Mode == ExportMode.Encode ? 14 : 22) / 8 / 1000;
 

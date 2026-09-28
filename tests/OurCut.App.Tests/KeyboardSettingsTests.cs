@@ -305,11 +305,11 @@ public sealed class KeyboardSettingsTests : IDisposable
 
         keyboard.Row(ShortcutAction.SetIn).ChangeCommand.Execute(null);
         Pump();
-        window.KeyPress(Key.J, RawInputModifiers.None, PhysicalKey.None, "j");
-        window.KeyTextInput("j");
-        window.KeyRelease(Key.J, RawInputModifiers.None, PhysicalKey.None, "j");
+        window.KeyPress(Key.U, RawInputModifiers.None, PhysicalKey.None, "u");
+        window.KeyTextInput("u");
+        window.KeyRelease(Key.U, RawInputModifiers.None, PhysicalKey.None, "u");
         Pump();
-        Assert.Equal(["J"], Chips(keyboard.Row(ShortcutAction.SetIn)));
+        Assert.Equal(["U"], Chips(keyboard.Row(ShortcutAction.SetIn)));
         Assert.Equal("", keyboard.Query);
         Assert.True(editor.Settings.IsOpen);
 

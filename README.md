@@ -87,6 +87,7 @@ panel with its own Undo. Only your own user account can connect to the editor.
 | ← / → | Previous / next frame |
 | Shift+← / Shift+→ | Jump back / forward (Settings → Playback → Jump length, 1 second by default) |
 | S | Split clip at playhead |
+| J | Join the selected clip with the next one (they must touch, or be less than 0.5 s apart) |
 | E | Exclude / keep the selected clip |
 | Del or Backspace | Delete the selected clip |
 | V | Select tool (the Split tool cuts a clip where you click it) |

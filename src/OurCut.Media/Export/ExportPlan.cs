@@ -73,14 +73,17 @@ public static partial class ExportPlanner
         fileExists ??= File.Exists;
         if (settings.Mode == CutMode.SmartCut)
             throw new InvalidOperationException("Smart cut is not available yet.");
-        var included = project.IncludedClips.ToList();
-        if (included.Count == 0)
+        // The included clips, less any seconds an earlier clip already exports (only projects saved with overlapping clips).
+        var parts = project.OutputParts();
+        if (parts.Count == 0)
             throw new InvalidOperationException("There are no clips to export. Include at least one clip.");
 
         bool lossless = settings.Mode == CutMode.Lossless;
-        var clips = included.Select((c, i) => new ExportClip(c.Id, i + 1, c.Label, c.Start, c.End,
+        if (lossless && settings.Merge)
+            parts = JoinTouching(parts);
+        var clips = parts.Select((p, i) => new ExportClip(p.Clip.Id, i + 1, p.Clip.Label, p.Start, p.End,
             lossless
-                ? CutPlanner.Plan(c.Start, c.End, keyframes, source.Family, source.Video?.HasBFrames ?? false,
+                ? CutPlanner.Plan(p.Start, p.End, keyframes, source.Family, source.Video?.HasBFrames ?? false,
                     source.Video?.FrameDuration ?? 1 / 30.0)
                 : null)).ToList();
 
@@ -156,7 +159,7 @@ public static partial class ExportPlanner
 
     /// <summary>
     /// The files an export writes before " (2)" is added to a taken name: <see cref="ExportSettings.FileNamePattern"/> for
-    /// the merged file, or for each included clip.
+    /// the merged file, or for each included clip (each <see cref="Project.OutputParts"/>).
     /// </summary>
     public static IReadOnlyList<string> OutputNames(Project project, ExportSettings settings)
     {
@@ -165,7 +168,7 @@ public static partial class ExportPlanner
             ExportFileNames.Fill(settings.FileNamePattern, settings.BaseName, number, label, settings.Date, merged) + ext);
         return settings.Merge
             ? [Name(1, "", merged: true)]
-            : [.. project.IncludedClips.Select((c, i) => Name(i + 1, c.Label, merged: false))];
+            : [.. project.OutputParts().Select((p, i) => Name(i + 1, p.Clip.Label, merged: false))];
     }
 
     /// <summary>
@@ -189,6 +192,24 @@ public static partial class ExportPlanner
             candidate = Path.Combine(dir, $"{name} ({n}){ext}");
         reserved.Add(candidate);
         return candidate;
+    }
+
+    /// <summary>
+    /// Parts that follow on in the source as well as in the output, as one stretch. A stream-copy cut starts at the
+    /// keyframe before its in-point, so cutting touching clips separately would play the frames between that keyframe
+    /// and the join twice. The stretch keeps the first clip's id and label (one chapter).
+    /// </summary>
+    internal static IReadOnlyList<OutputPart> JoinTouching(IReadOnlyList<OutputPart> parts)
+    {
+        var joined = new List<OutputPart>();
+        foreach (var part in parts)
+        {
+            if (joined.Count > 0 && Math.Abs(part.Start - joined[^1].End) <= Project.OverlapTolerance)
+                joined[^1] = joined[^1] with { End = part.End };
+            else
+                joined.Add(part);
+        }
+        return joined;
     }
 
     private static double Share(double duration, double total, int count) => total > 0 ? duration / total : 1.0 / count;

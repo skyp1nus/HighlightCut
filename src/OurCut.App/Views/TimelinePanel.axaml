@@ -160,7 +160,21 @@
         </Border>
 
         <Panel Grid.Column="1" Margin="0,0,12,0">
-          <c:TimelineControl Name="Timeline" Height="{Binding TimelineTracksHeight}" VerticalAlignment="Top" Editor="{Binding}" />
+          <c:TimelineControl Name="Timeline" Height="{Binding TimelineTracksHeight}" VerticalAlignment="Top" Editor="{Binding}">
+            <!-- A right-click on a clip selects it first (TimelineControl), so these act on that clip. -->
+            <c:TimelineControl.ContextMenu>
+              <ContextMenu>
+                <MenuItem Header="{Binding ExcludeLabel}" InputGesture="E" Command="{Binding ToggleExcludeCommand}"
+                          IsEnabled="{Binding HasSelection}" />
+                <MenuItem Header="Split at playhead" InputGesture="S" Command="{Binding SplitCommand}" />
+                <MenuItem Header="Join with next" InputGesture="J" Command="{Binding JoinWithNextCommand}"
+                          IsEnabled="{Binding CanJoinWithNext}" />
+                <Separator />
+                <MenuItem Header="Delete clip" InputGesture="Delete" Command="{Binding DeleteClipCommand}"
+                          IsEnabled="{Binding HasSelection}" />
+              </ContextMenu>
+            </c:TimelineControl.ContextMenu>
+          </c:TimelineControl>
           <ScrollBar Name="HScroll" Orientation="Horizontal" VerticalAlignment="Bottom" Height="8" Margin="0,0,0,3"
                      Minimum="0" Maximum="{Binding #Timeline.MaxScroll}" ViewportSize="{Binding #Timeline.Bounds.Width}"
                      Value="{Binding #Timeline.ScrollOffset, Mode=TwoWay}"
