@@ -101,7 +101,7 @@ public sealed class RealMediaTests : IDisposable
     public async Task Opening_a_video_fills_the_timeline_from_ffmpeg()
     {
         string video = await SampleAsync();
-        var (editor, window) = await OpenAsync(video);
+        var (editor, window) = await OpenAsync(video, e => e.ShowFrames = true);
         var preview = (MediaPreview)editor.Media!;
 
         Assert.Equal("sample", editor.ProjectName);
@@ -315,12 +315,12 @@ public sealed class RealMediaTests : IDisposable
     public async Task A_second_open_reads_the_analysis_from_the_cache()
     {
         string video = await SampleAsync();
-        var (first, w1) = await OpenAsync(video);
+        var (first, w1) = await OpenAsync(video, e => e.ShowFrames = true);
         var a = (MediaPreview)first.Media!;
         a.DetectScenes();
         await a.ScenesTask.WaitAsync(TimeSpan.FromSeconds(60), Ct);
         w1.Close();
-        var (second, w2) = await OpenAsync(video);
+        var (second, w2) = await OpenAsync(video, e => e.ShowFrames = true);
         var b = (MediaPreview)second.Media!;
         Assert.Equal(a.Keyframes, b.Keyframes);
         Assert.Equal(a.ThumbnailCount, b.ThumbnailCount);
@@ -337,6 +337,70 @@ public sealed class RealMediaTests : IDisposable
         second.ToggleScenesCommand.Execute(null);
         Assert.True(b.ScenesComplete);
         w2.Close();
+    }
+
+    [AvaloniaFact]
+    public async Task Thumbnails_are_made_only_while_the_Frames_chip_is_on()
+    {
+        string video = await SampleAsync();
+        var (editor, window) = await OpenAsync(video);
+        var preview = (MediaPreview)editor.Media!;
+
+        // Off (the default): none are made, and opening waited only for keyframes and the waveform.
+        Assert.False(editor.ShowFrames);
+        Assert.False(preview.ThumbnailsRequested);
+        Assert.Equal(0, preview.ThumbnailCount);
+        Assert.Matches(@"^keyframes \d+\.\d s · waveform \d+\.\d s$", preview.AnalysisTimes);
+        Assert.Equal(6, editor.Session.Keyframes.Count);
+
+        // On: the open file's are made, without the processing screen coming back.
+        editor.ToggleFramesCommand.Execute(null);
+        Assert.True(preview.ThumbnailsRequested);
+        Assert.False(preview.IsAnalysing);
+        Assert.StartsWith("making thumbnails ", preview.Activity, StringComparison.Ordinal);
+        await preview.ThumbnailsTask.WaitAsync(TimeSpan.FromSeconds(60), Ct);
+        Assert.Equal(3, preview.ThumbnailCount);
+        Assert.Null(preview.Activity);
+        Assert.Matches(@"^keyframes \d+\.\d s · thumbnails \d+\.\d s · waveform \d+\.\d s$", preview.AnalysisTimes);
+
+        // Off keeps a finished set, so on again shows it at once without making it again.
+        editor.ToggleFramesCommand.Execute(null);
+        Assert.Equal(3, preview.ThumbnailCount);
+        editor.ToggleFramesCommand.Execute(null);
+        Assert.True(preview.ThumbnailsTask.IsCompleted);
+        Assert.Equal(3, preview.ThumbnailCount);
+        window.Close();
+
+        // The next open with the chip on reads them from the cache.
+        var (again, w2) = await OpenAsync(video, e => e.ShowFrames = true);
+        var b = (MediaPreview)again.Media!;
+        Assert.Equal(3, b.ThumbnailCount);
+        Assert.Contains("thumbnails cached", b.AnalysisTimes, StringComparison.Ordinal);
+        w2.Close();
+    }
+
+    [AvaloniaFact]
+    public async Task Turning_the_Frames_chip_off_stops_the_thumbnails_and_keeps_nothing_of_them()
+    {
+        string video = await SampleAsync();
+        var (editor, window) = await OpenAsync(video);
+        var preview = (MediaPreview)editor.Media!;
+        editor.ToggleFramesCommand.Execute(null);
+        Assert.True(preview.ThumbnailsRequested);
+
+        editor.ToggleFramesCommand.Execute(null);
+        await preview.ThumbnailsTask.WaitAsync(TimeSpan.FromSeconds(60), Ct);
+        Assert.False(preview.ThumbnailsRequested);
+        Assert.Equal(0, preview.ThumbnailCount);
+        Assert.Null(preview.Activity);
+        Assert.DoesNotContain("thumbnails", preview.AnalysisTimes, StringComparison.Ordinal);
+
+        // Nothing half done was cached: turned on again, they are made afresh.
+        editor.ToggleFramesCommand.Execute(null);
+        await preview.ThumbnailsTask.WaitAsync(TimeSpan.FromSeconds(60), Ct);
+        Assert.Equal(3, preview.ThumbnailCount);
+        Assert.Matches(@"thumbnails \d+\.\d s", preview.AnalysisTimes);
+        window.Close();
     }
 
     [AvaloniaFact]

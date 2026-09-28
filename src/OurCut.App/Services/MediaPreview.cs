@@ -19,12 +19,12 @@ using OurCut.Transcription;
 namespace OurCut.App.Services;
 
 /// <summary>
-/// Preview of a real media file. Keyframes, the waveform and thumbnails are read from the cache or
-/// extracted with ffmpeg/ffprobe in the background, all three at once, and appear on the timeline
-/// as they arrive; the editor is usable immediately. Silences come from the waveform. Scene detection and
-/// transcription go through the whole video, so they run only when asked for (<see cref="DetectScenes"/>,
-/// <see cref="StartTranscription"/>); what an earlier run cached is shown straight away. How long each part took is
-/// kept for Copy diagnostics.
+/// Preview of a real media file. Keyframes and the waveform are read from the cache or extracted with ffmpeg/ffprobe
+/// in the background, both at once, and appear on the timeline as they arrive; the editor is usable immediately.
+/// Silences come from the waveform. Thumbnails are made alongside only when the timeline shows them
+/// (<see cref="ExtractThumbnails"/>, the Frames chip). Scene detection and transcription go through the whole video, so
+/// they run only when asked for (<see cref="DetectScenes"/>, <see cref="StartTranscription"/>); what an earlier run
+/// cached is shown straight away. How long each part took is kept for Copy diagnostics.
 /// </summary>
 public sealed class MediaPreview : IMediaPreview, IDisposable
 {
@@ -47,7 +47,11 @@ public sealed class MediaPreview : IMediaPreview, IDisposable
     private readonly int _expectedThumbnails;
     private double[] _keyframes = [];
     private double _keyframeProgress;
-    private volatile bool _thumbnailsDone;
+    private int _thumbnailsRequested;
+    private CancellationTokenSource? _thumbnailsCts;
+    private Task _thumbnailsTask = Task.CompletedTask;
+    private volatile bool _makingThumbnails;
+    private volatile bool _thumbnailsComplete;
     private volatile bool _analysing;
     private volatile bool _detectingScenes;
     private int _scenesRequested;
@@ -75,10 +79,7 @@ public sealed class MediaPreview : IMediaPreview, IDisposable
         Waveform = WaveformExtractor.Create(info);
         _expectedThumbnails = info.Video is null ? 0 : (int)Math.Floor(info.Duration / ThumbnailExtractor.IntervalFor(info.Duration)) + 1;
         if (info.Video is null)
-        {
             _keyframeProgress = 1;
-            _thumbnailsDone = true;
-        }
     }
 
     public MediaInfo Info { get; }
@@ -95,8 +96,8 @@ public sealed class MediaPreview : IMediaPreview, IDisposable
     public Task<IReadOnlyList<double>> KeyframesTask => _keyframesReady.Task;
 
     /// <summary>
-    /// Completes when keyframes, waveform and thumbnails (and cached scenes) are read, failed or cancelled. Scene
-    /// detection (<see cref="ScenesTask"/>) and transcription run on their own.
+    /// Completes when keyframes, waveform, cached scenes and thumbnails asked for meanwhile are read, failed or cancelled.
+    /// Scene detection (<see cref="ScenesTask"/>), transcription and thumbnails asked for later run on their own.
     /// </summary>
     public Task Analysis { get; private set; } = Task.CompletedTask;
 
@@ -112,7 +113,7 @@ public sealed class MediaPreview : IMediaPreview, IDisposable
         }
     }
 
-    /// <summary>Analysis progress 0..1 (keyframes, waveform and thumbnails weigh the same).</summary>
+    /// <summary>Analysis progress 0..1 (keyframes, waveform and thumbnails, if asked for, weigh the same).</summary>
     public double Progress => Parts() is { Count: > 0 } parts ? parts.Average(p => p.Done) : 1;
 
     public bool IsAnalysing => _analysing;
@@ -129,12 +130,17 @@ public sealed class MediaPreview : IMediaPreview, IDisposable
         if (Info.Video is not null)
         {
             parts.Add(("Finding keyframes", Volatile.Read(ref _keyframeProgress)));
-            parts.Add(("Making thumbnails", _thumbnailsDone ? 1 : Math.Min(1, (double)ThumbnailCount / Math.Max(1, _expectedThumbnails))));
+            if (ThumbnailsRequested)
+                parts.Add(("Making thumbnails", ThumbnailProgress));
         }
         if (Info.Audio.Length > 0)
             parts.Add(("Reading the audio", Waveform.IsComplete ? 1 : (double)Waveform.Decoded / Math.Max(1, Waveform.Capacity)));
         return parts;
     }
+
+    /// <summary>Thumbnails made so far, 0..1; 1 when none are being made.</summary>
+    private double ThumbnailProgress =>
+        _makingThumbnails ? Math.Min(1, (double)ThumbnailCount / Math.Max(1, _expectedThumbnails)) : 1;
 
     public string? AnalysisTimes =>
         _times.IsEmpty ? null : string.Join(" · ", TimedParts.Where(_times.ContainsKey).Select(part => $"{part} {_times[part]}"));
@@ -150,7 +156,9 @@ public sealed class MediaPreview : IMediaPreview, IDisposable
         {
             if (_analysing)
                 return $"analysing {Math.Floor(Progress * 100):0}%";
-            var parts = new List<string>(2);
+            var parts = new List<string>(3);
+            if (_makingThumbnails)
+                parts.Add($"making thumbnails {Math.Floor(ThumbnailProgress * 100):0}%");
             if (_transcriptState == TranscriptState.Running)
                 parts.Add($"transcribing {Math.Floor(TranscriptProgress * 100):0}%");
             if (_detectingScenes)
@@ -168,8 +176,9 @@ public sealed class MediaPreview : IMediaPreview, IDisposable
 
     /// <summary>
     /// Transcribes the file with <paramref name="setup"/>'s model, or reads that transcript from the cache. It starts
-    /// once keyframes, waveform and thumbnails are done (scene detection may still run) and fills in piece by piece.
-    /// Asking again with the same model and language changes nothing; another model or language starts over.
+    /// once keyframes, waveform and thumbnails asked for with the file are done (scene detection may still run) and
+    /// fills in piece by piece. Asking again with the same model and language changes nothing; another model or
+    /// language starts over.
     /// </summary>
     public void StartTranscription(TranscriptionSetup setup) => Transcribe(setup, cachedOnly: false);
 
@@ -298,7 +307,7 @@ public sealed class MediaPreview : IMediaPreview, IDisposable
     public Task ScenesTask { get; private set; } = Task.CompletedTask;
 
     /// <summary>
-    /// Starts scene detection (once): it reads every frame, so it waits for keyframes, waveform and thumbnails, and
+    /// Starts scene detection (once): it reads every frame, so it waits for the rest of the analysis, and
     /// its results fill in as it goes.
     /// </summary>
     public void DetectScenes()
@@ -346,6 +355,61 @@ public sealed class MediaPreview : IMediaPreview, IDisposable
         Interlocked.Exchange(ref _scenesCts, null)?.Cancel();
         Volatile.Write(ref _scenes, null);
         _detectingScenes = false;
+        NotifyChanged();
+    }
+
+    /// <summary>Completes when the thumbnails asked for are made, failed or were stopped; done while nobody asked.</summary>
+    public Task ThumbnailsTask => Volatile.Read(ref _thumbnailsTask);
+
+    /// <summary>Thumbnails were asked for (the Frames chip is on); until then none are made.</summary>
+    public bool ThumbnailsRequested => Info.Video is null || Volatile.Read(ref _thumbnailsRequested) == 1;
+
+    /// <summary>
+    /// Makes the timeline's thumbnails (once), or reads them from the cache; they appear as they arrive. Asked for while
+    /// the file is being opened, they are part of <see cref="Analysis"/> (the processing screen waits for them).
+    /// </summary>
+    public void ExtractThumbnails()
+    {
+        if (Info.Video is null || _disposed || Interlocked.Exchange(ref _thumbnailsRequested, 1) == 1 || _thumbnailsComplete)
+            return;
+        var cts = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token);
+        _thumbnailsCts = cts;
+        var ct = cts.Token;
+        var stopped = _thumbnailsTask;
+        _makingThumbnails = true;
+        Volatile.Write(ref _thumbnailsTask, Task.Run(async () =>
+        {
+            try
+            {
+                // A run stopped a moment ago lets go of its ffmpeg (and its last thumbnail) first.
+                await stopped.ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
+                await Guard(() => ExtractThumbnailsAsync(ct)).ConfigureAwait(false);
+            }
+            finally
+            {
+                if (ReferenceEquals(_thumbnailsCts, cts))
+                    _makingThumbnails = false;
+                NotifyChanged();
+            }
+        }, CancellationToken.None));
+        NotifyChanged();
+    }
+
+    /// <summary>
+    /// Stops making thumbnails (the Frames chip turned off): what was made so far is dropped and nothing is cached. A
+    /// finished set stays, so turning the chip back on shows it at once.
+    /// </summary>
+    public void StopThumbnails()
+    {
+        if (Info.Video is null || Interlocked.Exchange(ref _thumbnailsRequested, 0) == 0)
+            return;
+        Interlocked.Exchange(ref _thumbnailsCts, null)?.Cancel();
+        _makingThumbnails = false;
+        lock (_lock)
+        {
+            if (!_thumbnailsComplete)
+                DropThumbnails();
+        }
         NotifyChanged();
     }
 
@@ -410,8 +474,15 @@ public sealed class MediaPreview : IMediaPreview, IDisposable
             await Task.WhenAll(
                 Guard(() => ScanKeyframesAsync(ct)),
                 Guard(() => ExtractWaveformAsync(ct)),
-                Guard(() => ExtractThumbnailsAsync(ct)),
                 Guard(() => Task.Run(LoadCachedScenes, ct))).ConfigureAwait(false);
+            // Thumbnails asked for meanwhile (the Frames chip on when the file opens) are part of opening it; stopped, they
+            // end at once. The editor asks on the UI thread as it loads the file, so this looks once that is through.
+            await Guard(async () =>
+            {
+                await Dispatcher.UIThread.InvokeAsync(() => { }, DispatcherPriority.Background, ct).GetTask().ConfigureAwait(false);
+                for (Task thumbnails; !(thumbnails = Volatile.Read(ref _thumbnailsTask)).IsCompleted;)
+                    await thumbnails.ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
+            }).ConfigureAwait(false);
         }
         finally
         {
@@ -515,40 +586,41 @@ public sealed class MediaPreview : IMediaPreview, IDisposable
     {
         if (Info.Video is null)
             return;
-        try
+        int height = ThumbnailExtractor.DefaultHeight;
+        if (_cache?.LoadThumbnails(Info.Path, height) is { Count: > 0 } cached)
         {
-            int height = ThumbnailExtractor.DefaultHeight;
-            if (_cache?.LoadThumbnails(Info.Path, height) is { Count: > 0 } cached)
-            {
-                foreach (var frame in cached)
-                    Add(frame);
-                Cached("thumbnails");
-                return;
-            }
+            foreach (var frame in cached)
+                Add(frame, ct);
+            Cached("thumbnails");
+        }
+        else
+        {
             var frames = new List<ThumbnailFrame>();
             var watch = Stopwatch.StartNew();
             await ThumbnailExtractor.ExtractAsync(Info, frame =>
             {
                 frames.Add(frame);
-                Add(frame);
+                Add(frame, ct);
             }, height, cancellationToken: ct).ConfigureAwait(false);
             Took("thumbnails", watch);
             _cache?.SaveThumbnails(Info.Path, frames);
         }
-        finally
+        lock (_lock)
         {
-            _thumbnailsDone = true;
-            NotifyChanged();
+            // Stopped just now, the set was dropped (or is being): it is not complete.
+            if (!ct.IsCancellationRequested)
+                _thumbnailsComplete = true;
         }
     }
 
-    private void Add(ThumbnailFrame frame)
+    /// <summary>Adds a thumbnail unless the preview is closed or the run it came from was stopped.</summary>
+    private void Add(ThumbnailFrame frame, CancellationToken ct)
     {
         var color = ToBitmap(frame.Bgra, frame.Width, frame.Height);
         var grey = ToBitmap(Desaturate(frame.Bgra, ExcludedGrey), frame.Width, frame.Height);
         lock (_lock)
         {
-            if (_disposed)
+            if (_disposed || ct.IsCancellationRequested)
             {
                 color.Dispose();
                 grey.Dispose();
@@ -636,6 +708,17 @@ public sealed class MediaPreview : IMediaPreview, IDisposable
         }
     }
 
+    /// <summary>Frees every thumbnail. Call with the lock held.</summary>
+    private void DropThumbnails()
+    {
+        foreach (var t in _thumbnails)
+        {
+            t.Color.Dispose();
+            t.Grey.Dispose();
+        }
+        _thumbnails.Clear();
+    }
+
     /// <summary>The thumbnail closest in time. Call with the lock held.</summary>
     private Thumbnail? Nearest(double time)
     {
@@ -680,16 +763,11 @@ public sealed class MediaPreview : IMediaPreview, IDisposable
             if (_disposed)
                 return;
             _disposed = true;
-            foreach (var t in _thumbnails)
-            {
-                t.Color.Dispose();
-                t.Grey.Dispose();
-            }
-            _thumbnails.Clear();
+            DropThumbnails();
         }
         _cts.Cancel();
         // The analysis still holds the token until it notices the cancellation.
-        Task.WhenAll(Analysis, ScenesTask).ContinueWith(_ => _cts.Dispose(), CancellationToken.None, TaskContinuationOptions.None, TaskScheduler.Default);
+        Task.WhenAll(Analysis, ScenesTask, Volatile.Read(ref _thumbnailsTask)).ContinueWith(_ => _cts.Dispose(), CancellationToken.None, TaskContinuationOptions.None, TaskScheduler.Default);
     }
 
     /// <summary>An <see cref="IProgress{T}"/> that reports on the calling thread (no UI marshalling).</summary>
