@@ -80,12 +80,8 @@ public sealed partial class EditorViewModel
     }
 
     /// <summary>"Keep as clip": a clip for the words, placed among the clips by source position and selected. One undo step.</summary>
-    public void KeepWords(double start, double end, string label) => TryEdit(() =>
-    {
-        int index = Session.Project.Clips.FindIndex(c => c.Start > start);
-        var clip = Session.AddClip(start, end, label, index < 0 ? Session.Project.Clips.Count : index);
-        Select(Find(clip.Id));
-    });
+    /// <remarks>Words partly in a clip already get a clip for the rest; words wholly in one are refused, with a message.</remarks>
+    public void KeepWords(double start, double end, string label) => TryEdit(() => Select(Find(Session.KeepRange(start, end, label).Id)));
 
     /// <summary>
     /// "Cut out": cuts the range out of the included clips as one undo step; with no clips the whole video is kept first,

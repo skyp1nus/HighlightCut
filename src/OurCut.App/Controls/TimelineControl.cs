@@ -89,6 +89,8 @@ public sealed class TimelineControl : Control, ICustomHitTest
     private static readonly IPen SegmentBorder = new Pen(new SolidColorBrush(Color.FromArgb(77, 59, 130, 246)), 1);
     private static readonly IPen SegmentBorderSelected = new Pen(AccentBrush, 1);
     private static readonly IPen SegmentBorderExcluded = new Pen(White(0.25), 1, new DashStyle([3, 3], 0));
+    private static readonly IBrush SnapLine = new SolidColorBrush(Color.Parse("#F2F2F2"));
+    private static readonly IBrush SnapGlow = White(0.16);
     private static readonly IBrush Handle = White(0.4);
     private static readonly IBrush HandleSelected = new SolidColorBrush(Color.Parse("#F2F2F2"));
     private static readonly IBrush LaneBg = new SolidColorBrush(Color.Parse("#0F1012"));
@@ -315,6 +317,7 @@ public sealed class TimelineControl : Control, ICustomHitTest
         foreach (var clip in clips)
             DrawHandles(context, clip, visible);
         DrawRings(context, editor, visible);
+        DrawJoin(context, editor);
         DrawPlayhead(context, editor);
     }
 
@@ -736,6 +739,24 @@ public sealed class TimelineControl : Control, ICustomHitTest
         }
     }
 
+    /// <summary>
+    /// While a trim handle is being dragged and its end touches another clip (the magnet caught it), a line where the
+    /// two meet shows they are snapped together.
+    /// </summary>
+    private void DrawJoin(DrawingContext ctx, EditorViewModel editor)
+    {
+        if (_drag is not { Kind: DragKind.TrimIn or DragKind.TrimOut, Moved: true, Clip: { } clip })
+            return;
+        bool inPoint = _drag.Kind == DragKind.TrimIn;
+        double edge = inPoint ? clip.Start : clip.End;
+        bool touches = editor.Clips.Any(c => !ReferenceEquals(c, clip) && Math.Abs((inPoint ? c.End : c.Start) - edge) < 1e-6);
+        if (!touches)
+            return;
+        double x = X(edge);
+        ctx.FillRectangle(SnapGlow, new Rect(x - 2, VideoTop, 4, TotalHeight - VideoTop));
+        ctx.FillRectangle(SnapLine, new Rect(x - 0.5, VideoTop, 1, TotalHeight - VideoTop));
+    }
+
     private void DrawPlayhead(DrawingContext ctx, EditorViewModel editor)
     {
         double x = X(editor.Time);
@@ -780,9 +801,18 @@ public sealed class TimelineControl : Control, ICustomHitTest
     {
         base.OnPointerPressed(e);
         var editor = _editor;
-        if (editor is null || !editor.HasFile || !e.GetCurrentPoint(this).Properties.IsLeftButtonPressed)
+        if (editor is null || !editor.HasFile)
             return;
         var p = e.GetPosition(this);
+        if (e.GetCurrentPoint(this).Properties.IsRightButtonPressed)
+        {
+            // The context menu (exclude, split, join, delete) acts on the clip that was right-clicked.
+            if (HitTest(p) is { Clip: { } clicked })
+                editor.Select(clicked);
+            return;
+        }
+        if (!e.GetCurrentPoint(this).Properties.IsLeftButtonPressed)
+            return;
         double t = Math.Clamp(T(p.X + Scroll), 0, Duration);
         var hit = HitTest(p);
         if (InLane(p) && hit?.Kind is not (HitKind.TrimIn or HitKind.TrimOut))
@@ -845,7 +875,8 @@ public sealed class TimelineControl : Control, ICustomHitTest
                 return;
             case DragKind.TrimIn or DragKind.TrimOut:
                 double v = _drag.Origin + (p.X - _drag.StartX) / Pps;
-                // Alt drags freely, without snapping to keyframes.
+                // Within SnapPixels the end snaps onto the next clip's edge (the magnet) or, with the Snap chip on, a
+                // keyframe. Alt drags freely.
                 double snap = e.KeyModifiers.HasFlag(KeyModifiers.Alt) ? 0 : SnapPixels / Pps;
                 editor.Trim(_drag.Clip!, _drag.Kind == DragKind.TrimIn, v, snap, _drag.MergeKey);
                 return;
@@ -870,6 +901,7 @@ public sealed class TimelineControl : Control, ICustomHitTest
         {
             _drag = default;
             e.Pointer.Capture(null);
+            InvalidateVisual();
         }
     }
 
@@ -877,6 +909,7 @@ public sealed class TimelineControl : Control, ICustomHitTest
     {
         base.OnPointerCaptureLost(e);
         _drag = default;
+        InvalidateVisual();
     }
 
     protected override void OnPointerWheelChanged(PointerWheelEventArgs e)

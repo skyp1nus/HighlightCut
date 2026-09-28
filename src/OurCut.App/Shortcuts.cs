@@ -90,6 +90,9 @@ public static class Shortcuts
             case ShortcutAction.Split:
                 editor.Split();
                 break;
+            case ShortcutAction.JoinWithNext:
+                editor.JoinWithNext();
+                break;
             case ShortcutAction.ToggleExclude:
                 editor.ToggleExclude();
                 break;

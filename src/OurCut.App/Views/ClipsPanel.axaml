@@ -49,6 +49,8 @@
               <MenuItem Header="{Binding ExcludeLabel}" InputGesture="E" Command="{Binding ToggleExcludeCommand}"
                         IsEnabled="{Binding HasSelection}" />
               <MenuItem Header="Split at playhead" InputGesture="S" Command="{Binding SplitCommand}" />
+              <MenuItem Header="Join with next" InputGesture="J" Command="{Binding JoinWithNextCommand}"
+                        IsEnabled="{Binding CanJoinWithNext}" />
               <Separator />
               <MenuItem Header="Delete clip" InputGesture="Delete" Command="{Binding DeleteClipCommand}"
                         IsEnabled="{Binding HasSelection}" />

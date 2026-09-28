@@ -25,6 +25,66 @@ public class EditorViewModelTests
     }
 
     [AvaloniaFact]
+    public void A_project_saved_with_overlapping_clips_opens_and_counts_each_second_once()
+    {
+        var editor = App.CreateEditor(null);
+        editor.LeaveDemo();
+        var project = DesignSample.Project with
+        {
+            Clips = [new Clip(1, "Cold open", 12, 45.2), new Clip(2, "Again", 40, 60)],
+        };
+
+        editor.LoadProject(project, new DesignSample(), DesignSample.SourceInfo);
+
+        Assert.Equal(2, editor.Clips.Count);
+        Assert.Equal(48, editor.OutputDuration, 6);
+        Assert.Contains("Clips 1 and 2 overlap", editor.StatusMessage);
+
+        editor.Select(editor.Find(1));
+        Assert.True(editor.CanJoinWithNext);
+        editor.JoinWithNext();
+        Assert.Empty(editor.Session.Project.Overlaps());
+        Assert.Equal((12.0, 60.0), (editor.Find(1)!.Start, editor.Find(1)!.End));
+    }
+
+    [AvaloniaFact]
+    public void Set_in_and_out_stop_at_the_neighbouring_clips()
+    {
+        var editor = Sample();
+        var clip = editor.Find(2)!;
+        var before = editor.Clips.Where(c => c.End <= clip.Start).MaxBy(c => c.End)!;
+        editor.Select(clip);
+
+        editor.SetTime(before.End - 5);
+        editor.MarkIn();
+
+        Assert.Equal(before.End, clip.Start);
+        Assert.Empty(editor.Session.Project.Overlaps());
+    }
+
+    [AvaloniaFact]
+    public void Set_in_without_a_selection_makes_a_clip_that_stops_at_the_next_one()
+    {
+        var editor = Sample();
+        var next = editor.Find(2)!;
+        editor.Select(null);
+        editor.SetTime(next.Start - 4);
+
+        editor.MarkIn();
+
+        var added = editor.SelectedClip!;
+        Assert.Equal((next.Start - 4, next.Start), (added.Start, added.End));
+
+        // Inside a clip there is nothing to start: it says which clip to select instead.
+        editor.Select(null);
+        editor.SetTime(next.Start + 10);
+        int count = editor.Clips.Count;
+        editor.MarkIn();
+        Assert.Equal(count, editor.Clips.Count);
+        Assert.Contains($"in clip {next.Number}", editor.StatusMessage);
+    }
+
+    [AvaloniaFact]
     public void Opening_a_project_refreshes_everything_derived_from_its_source()
     {
         var editor = App.CreateEditor(null);

@@ -212,7 +212,7 @@ public class McpToolListTests
     [
         "add_segment", "cancel_export", "cut_filler_words", "cut_ranges", "cut_silences", "edit_timeline", "export",
         "find_filler_words", "find_keyframes", "find_scene_changes", "find_silences", "get_export_status", "get_history", "get_project",
-        "get_transcript", "list_videos", "move_segment", "open_file", "redo", "remove_segment", "revert_action", "save_project",
+        "get_transcript", "join_segments", "list_videos", "move_segment", "open_file", "redo", "remove_segment", "revert_action", "save_project",
         "search_transcript", "seek", "set_included", "set_label", "set_playing", "split_segment", "trim_segment", "undo",
     ];
 
@@ -322,6 +322,57 @@ public class McpEditingTests
         Assert.Equal(("Demo 1", 99.0), (p.Get(2).Label, p.Get(2).Start));
         Assert.Equal("Demo 2", p.Get(4).Label);
         Assert.Equal(131, result.GetProperty("outputDuration").GetDouble());
+    }
+
+    [Fact]
+    public async Task Clips_cannot_overlap_through_claudes_edits()
+    {
+        var editor = new FakeEditor();
+        await using var c = await Connection.OpenAsync(editor);
+
+        var add = await c.Client.Call("add_segment", new { start = 30, end = 60 });
+        Assert.True(add.IsError);
+        Assert.Contains("overlaps clip 1", add.Text(), StringComparison.Ordinal);
+
+        var trim = await c.Client.Call("trim_segment", new { clip = 2, start = 35 });
+        Assert.True(trim.IsError);
+        Assert.Contains("overlaps clip 1", trim.Text(), StringComparison.Ordinal);
+
+        var batch = await c.Client.Call("edit_timeline", new
+        {
+            description = "Overlap",
+            operations = new object[] { new { action = "add", start = 190, end = 250 } },
+        });
+        Assert.True(batch.IsError);
+        Assert.Empty(editor.Session.History.Entries);
+    }
+
+    [Fact]
+    public async Task Join_segments_joins_a_clip_with_the_one_right_after_it()
+    {
+        var editor = new FakeEditor();
+        await using var c = await Connection.OpenAsync(editor);
+        (await c.Client.Call("trim_segment", new { clip = 1, end = 100 })).Json();
+
+        var result = (await c.Client.Call("join_segments", new { clip = 1 })).Json();
+
+        Assert.Equal("Joined clips 1 and 2", result.GetProperty("result").GetString());
+        var joined = editor.Session.Project.Get(1);
+        Assert.Equal(("Intro", 10.0, 200.0), (joined.Label, joined.Start, joined.End));
+        Assert.Null(editor.Session.Project.Find(2));
+        Assert.Equal(EditOrigin.Assistant, editor.Session.History.NextUndo!.Origin);
+
+        var far = await c.Client.Call("join_segments", new { clip = 1 });
+        Assert.True(far.IsError);
+        Assert.Contains("apart", far.Text(), StringComparison.Ordinal);
+
+        // In a batch, "join" finds the next clip after the operations before it.
+        (await c.Client.Call("edit_timeline", new
+        {
+            description = "Closed the gap",
+            operations = new object[] { new { action = "trim", clip = 3, start = 200 }, new { action = "join", clip = 1 } },
+        })).Json();
+        Assert.Equal(360, editor.Session.Project.Get(1).End);
     }
 
     [Fact]

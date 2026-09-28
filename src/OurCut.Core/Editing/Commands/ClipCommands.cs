@@ -17,6 +17,7 @@ public sealed record AddClipCommand(double Start, double End, string? Label = nu
     public Project Apply(Project project)
     {
         EditRules.ValidateRange(project, Start, End);
+        EditRules.ValidateFree(project, Start, End);
         int id = Id ?? project.NextClipId;
         if (project.Find(id) is not null)
             throw new EditException($"Clip {id} already exists.");
@@ -67,6 +68,14 @@ public sealed record SetClipRangeCommand(int ClipId, double Start, double End) :
         EditRules.ValidateRange(project, Start, End);
         if (clip.Start == Start && clip.End == End)
             return project;
+        // Only the time the clip gains is checked, so a clip that already overlaps another (an old project) can still shrink.
+        Clip? other = null;
+        if (Start < clip.Start)
+            other = project.FirstOverlapping(Start, Math.Min(clip.Start, End), ClipId);
+        if (other is null && End > clip.End)
+            other = project.FirstOverlapping(Math.Max(clip.End, Start), End, ClipId);
+        if (other is not null)
+            throw EditRules.OverlapError(project, Start, End, other);
         return project with { Clips = project.Clips.Replace(clip, clip with { Start = Start, End = End }) };
     }
 }
@@ -91,6 +100,65 @@ public sealed record SplitClipCommand(int ClipId, double At) : IEditCommand
 
     /// <summary>Id the second part will get when applied to <paramref name="project"/>.</summary>
     public static int SecondPartId(Project project) => project.NextClipId;
+}
+
+/// <summary>
+/// Joins two clips that follow each other on the source timeline into one: the first gets the second's out-point and the
+/// second is removed. The joined clip keeps the first clip's id, name and whether it is included, at the earlier of their
+/// two places in the output. The clips must touch or be less than <see cref="EditRules.JoinGap"/> apart (the gap then
+/// becomes part of the clip) and be next to each other in the output.
+/// </summary>
+public sealed record JoinClipsCommand(int FirstId, int SecondId) : IEditCommand
+{
+    public string Name => "join_segments";
+
+    public string Describe(Project before) => $"Joined clips {before.NumberOf(FirstId)} and {before.NumberOf(SecondId)}";
+
+    /// <summary>Joins <paramref name="clipId"/> with the clip that starts next after it on the source timeline.</summary>
+    /// <exception cref="EditException">The clip does not exist or has no clip after it.</exception>
+    public static JoinClipsCommand WithNext(Project project, int clipId)
+    {
+        var clip = project.Get(clipId);
+        var next = project.Clips.Where(c => c.Id != clipId && c.Start >= clip.Start && c.End > clip.End)
+                       .OrderBy(c => c.Start).ThenBy(c => c.End).FirstOrDefault()
+                   ?? throw new EditException($"Clip {project.NumberOf(clipId)} has no clip after it.");
+        return new JoinClipsCommand(clipId, next.Id);
+    }
+
+    /// <summary>Why the clips cannot be joined, or null when they can.</summary>
+    public string? Problem(Project project)
+    {
+        var first = project.Find(FirstId);
+        var second = project.Find(SecondId);
+        if (first is null || second is null)
+            return $"Clip {(first is null ? FirstId : SecondId)} does not exist.";
+        int a = project.NumberOf(FirstId), b = project.NumberOf(SecondId);
+        if (FirstId == SecondId)
+            return "A clip cannot be joined with itself.";
+        if (second.Start < first.Start || second.End <= first.End)
+            return $"Clip {b} does not come after clip {a} in the source.";
+        double gap = second.Start - first.End;
+        if (gap > EditRules.JoinGap + EditRules.Epsilon)
+            return $"Clips {a} and {b} are {TimeFormat.ShortDuration(gap)} apart; only clips that touch or are less than " +
+                   $"{EditRules.JoinGap} s apart can be joined.";
+        if (gap > Project.OverlapTolerance && project.Clips.FirstOrDefault(c => c.Id != FirstId && c.Id != SecondId
+                && Math.Min(second.Start, c.End) - Math.Max(first.End, c.Start) > Project.OverlapTolerance) is { } between)
+            return $"Clip {project.NumberOf(between.Id)} is between clips {a} and {b}.";
+        if (Math.Abs(a - b) != 1)
+            return $"Clips {a} and {b} are not next to each other in the output; move them together first.";
+        return null;
+    }
+
+    public Project Apply(Project project)
+    {
+        if (Problem(project) is { } problem)
+            throw new EditException(problem);
+        var first = project.Get(FirstId);
+        int index = Math.Min(project.IndexOf(FirstId), project.IndexOf(SecondId));
+        var clips = project.Clips.RemoveAll(c => c.Id == FirstId || c.Id == SecondId)
+            .Insert(index, first with { End = project.Get(SecondId).End });
+        return project with { Clips = clips };
+    }
 }
 
 /// <summary>Includes a clip in the export or excludes it (the clip stays in the project).</summary>

@@ -74,6 +74,7 @@ public sealed class EditorSession
         var after = command.Apply(before);
         if (ReferenceEquals(after, before))
             return null;
+        EditRules.ValidateNoNewOverlap(before, after);
         var entry = History.Push(new HistoryEntry(command, command.Describe(before), before, after, origin,
             DateTimeOffset.Now, mergeKey));
         Project = after;
@@ -182,38 +183,75 @@ public sealed class EditorSession
         return Project.Get(id);
     }
 
-    /// <summary>Adds a clip for a source range, placed among the clips by source position ("+ Keep").</summary>
-    public Clip KeepRange(double start, double end, EditOrigin origin = EditOrigin.User)
+    /// <summary>
+    /// Adds a clip for a source range, placed among the clips by source position ("+ Keep", "Keep as clip"). Clips do not
+    /// overlap, so the range is cut down to its free part (see <see cref="Project.FreeRange"/>).
+    /// </summary>
+    /// <exception cref="EditException">Other clips already cover the range, or all but a sliver of it.</exception>
+    public Clip KeepRange(double start, double end, string? label = null, EditOrigin origin = EditOrigin.User)
     {
-        int index = Project.Clips.FindIndex(c => c.Start > start);
-        return AddClip(start, end, null, index < 0 ? Project.Clips.Count : index, origin);
+        var free = Project.FreeRange(start, end);
+        if (free is not { } range)
+        {
+            throw new EditException(Project.FirstOverlapping(start, end) is { } clip
+                ? $"That is already in clip {Project.NumberOf(clip.Id)}."
+                : $"Clips must be at least {EditRules.MinClipDuration} s long.");
+        }
+        int index = Project.Clips.FindIndex(c => c.Start > range.Start);
+        return AddClip(range.Start, range.End, label, index < 0 ? Project.Clips.Count : index, origin);
     }
 
     public void SetRange(int clipId, double start, double end, EditOrigin origin = EditOrigin.User, string? mergeKey = null) =>
         Execute(new SetClipRangeCommand(clipId, start, end), origin, mergeKey);
 
     /// <summary>
-    /// Moves one end of a clip, clamped so the clip stays inside the source and at least
-    /// <see cref="EditRules.MinClipDuration"/> long, and snapped to the nearest keyframe within
-    /// <paramref name="snapThreshold"/> seconds (0 turns snapping off). Returns the new time of that end.
+    /// Moves one end of a clip, clamped so the clip stays inside the source, at least <see cref="EditRules.MinClipDuration"/>
+    /// long and clear of its neighbours (it stops at their edge). Within <paramref name="snapThreshold"/> seconds
+    /// (0 turns snapping off) the end snaps onto the neighbour's edge, so the two clips touch, or else, with
+    /// <paramref name="snapToKeyframes"/>, onto the nearest keyframe. Returns the new time of that end.
     /// </summary>
     public double Trim(int clipId, ClipEdge edge, double time, double snapThreshold = 0, string? mergeKey = null,
-        EditOrigin origin = EditOrigin.User)
+        EditOrigin origin = EditOrigin.User, bool snapToKeyframes = true)
     {
         var clip = Project.Get(clipId);
-        double t = Snapping.ToNearest(Keyframes, time, snapThreshold);
-        double duration = Project.Source?.Duration ?? double.MaxValue;
+        double limit = Project.TrimLimit(clip, edge);
+        double t = snapThreshold > 0 && Math.Abs(time - limit) <= snapThreshold ? limit
+            : Snapping.ToNearest(snapToKeyframes ? Keyframes : [], time, snapThreshold);
         if (edge == ClipEdge.In)
         {
-            t = Math.Clamp(t, 0, Math.Max(0, clip.End - EditRules.MinClipDuration));
+            t = Math.Clamp(t, limit, Math.Max(limit, clip.End - EditRules.MinClipDuration));
             SetRange(clipId, t, clip.End, origin, mergeKey);
         }
         else
         {
-            t = Math.Clamp(t, Math.Min(duration, clip.Start + EditRules.MinClipDuration), duration);
+            t = Math.Clamp(t, Math.Min(limit, clip.Start + EditRules.MinClipDuration), limit);
             SetRange(clipId, clip.Start, t, origin, mergeKey);
         }
         return t;
+    }
+
+    /// <summary>
+    /// Joins a clip with the one right after it on the source timeline (see <see cref="JoinClipsCommand"/>).
+    /// Returns the joined clip.
+    /// </summary>
+    /// <exception cref="EditException">There is no clip after it, or the two cannot be joined.</exception>
+    public Clip JoinWithNext(int clipId, EditOrigin origin = EditOrigin.User)
+    {
+        Execute(JoinClipsCommand.WithNext(Project, clipId), origin);
+        return Project.Get(clipId);
+    }
+
+    /// <summary>Whether <see cref="JoinWithNext"/> would work for the clip.</summary>
+    public bool CanJoinWithNext(int clipId)
+    {
+        try
+        {
+            return JoinClipsCommand.WithNext(Project, clipId).Problem(Project) is null;
+        }
+        catch (EditException)
+        {
+            return false;
+        }
     }
 
     /// <summary>Splits a clip at <paramref name="time"/> and returns the second part.</summary>

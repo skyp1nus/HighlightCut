@@ -139,19 +139,40 @@ public sealed class TranscriptPanelTests : IDisposable
     {
         var editor = App.CreateEditor(DesignScreen.Transcript);
         var panel = Panel(editor);
-        panel.Select(271, 273);
+        // Three words in the gap between clip 1 and clip 2.
+        int first = panel.Words.ToList().FindIndex(w => w.Start > editor.Find(1)!.End + 1);
+        Assert.True(panel.Words[first + 2].End < editor.Find(2)!.Start - 1);
+        panel.Select(first, first + 2);
 
         panel.KeepSelectionCommand.Execute(null);
 
         var clip = editor.SelectedClip!;
-        Assert.Equal("export This is", clip.Label);
-        Assert.Equal(264.217, clip.Start, 3);
-        Assert.Equal(panel.Words[273].End + 0.1, clip.End, 6);
-        Assert.Equal(editor.Clips.IndexOf(editor.Find(3)!) + 1, editor.Clips.IndexOf(clip));
+        Assert.NotEqual(2, clip.Id);
+        Assert.False(string.IsNullOrWhiteSpace(clip.Label));
+        Assert.True(clip.Start < panel.Words[first].Start && clip.Start > editor.Find(1)!.End);
+        Assert.Equal(panel.Words[first + 2].End + 0.1, clip.End, 6);
+        Assert.Equal(editor.Clips.IndexOf(editor.Find(1)!) + 1, editor.Clips.IndexOf(clip));
         Assert.False(panel.HasSelection);
 
         editor.Undo();
         Assert.Equal(11, editor.Clips.Count);
+    }
+
+    [AvaloniaFact]
+    public void Keep_as_clip_does_not_duplicate_words_a_clip_already_has()
+    {
+        var editor = App.CreateEditor(DesignScreen.Transcript);
+        var panel = Panel(editor);
+        double output = editor.OutputDuration;
+        // "export This is": inside clip 3.
+        panel.Select(271, 273);
+
+        panel.KeepSelectionCommand.Execute(null);
+
+        Assert.Equal(11, editor.Clips.Count);
+        Assert.Equal(output, editor.OutputDuration, 6);
+        Assert.Contains("already in clip", editor.StatusMessage);
+        Assert.Empty(editor.Session.Project.Overlaps());
     }
 
     [AvaloniaFact]
