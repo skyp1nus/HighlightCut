@@ -67,6 +67,7 @@ public sealed class TimelineControl : Control
     private static readonly IBrush SceneLine = White(0.16);
     private static readonly IBrush TrackLine = White(0.05);
     private static readonly IBrush FrameGap = new SolidColorBrush(Color.Parse("#0B0C0E"));
+    private static readonly IBrush PlainTrack = new SolidColorBrush(Color.Parse("#16171A"));
     private static readonly IBrush KeyframeTick = White(0.3);
     private static readonly IBrush AudioBg = new SolidColorBrush(Color.Parse("#101113"));
     private static readonly IBrush SilenceHatch = White(0.05);
@@ -410,14 +411,11 @@ public sealed class TimelineControl : Control
         var track = new Rect(0, VideoTop, w, VideoHeight);
         using (ctx.PushClip(track))
         {
-            int n = Math.Max(1, (int)Math.Round(FramesAtFit * Zoom));
-            double fw = w / n;
-            for (int i = (int)Math.Max(0, Math.Floor(visible.Left / fw)); i < n && i * fw < visible.Right; i++)
-            {
-                var r = new Rect(i * fw, VideoTop, fw, VideoHeight);
-                media.DrawFrame(ctx, r, (i + 0.5) / n * Duration, FrameLook.Thumbnail, i);
-                ctx.FillRectangle(FrameGap, new Rect(Math.Round(r.Right) - 1, r.Y, 1, r.Height));
-            }
+            // Frames chip off: a plain strip of the same height, with everything else on it as before.
+            if (!editor.ShowFrames)
+                ctx.FillRectangle(PlainTrack, new Rect(visible.Left, VideoTop, visible.Width, VideoHeight));
+            else
+                DrawThumbnails(ctx, media, visible, w);
 
             if (editor.ShowKeyframes)
                 DrawKeyframes(ctx, media, visible);
@@ -428,6 +426,19 @@ public sealed class TimelineControl : Control
             }
         }
         ctx.FillRectangle(TrackLine, new Rect(visible.Left, VideoTop, visible.Width, 1));
+    }
+
+    /// <summary>A row of thumbnails across the video track, more of them as it zooms in.</summary>
+    private void DrawThumbnails(DrawingContext ctx, IMediaPreview media, Rect visible, double w)
+    {
+        int n = Math.Max(1, (int)Math.Round(FramesAtFit * Zoom));
+        double fw = w / n;
+        for (int i = (int)Math.Max(0, Math.Floor(visible.Left / fw)); i < n && i * fw < visible.Right; i++)
+        {
+            var r = new Rect(i * fw, VideoTop, fw, VideoHeight);
+            media.DrawFrame(ctx, r, (i + 0.5) / n * Duration, FrameLook.Thumbnail, i);
+            ctx.FillRectangle(FrameGap, new Rect(Math.Round(r.Right) - 1, r.Y, 1, r.Height));
+        }
     }
 
     /// <summary>Hairline ticks along the top of the video track where lossless cuts can start.</summary>

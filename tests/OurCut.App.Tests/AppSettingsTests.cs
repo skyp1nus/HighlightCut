@@ -25,7 +25,7 @@ public sealed class AppSettingsTests : IDisposable
             UseGpuEncoder: false, FileExistsAction.Overwrite, AfterExportAction.Nothing),
         new KeyboardSettings(new Dictionary<string, IReadOnlyList<string>> { ["ToggleExclude"] = ["Ctrl E"], ["Export"] = [] }),
         new McpSettings(Enabled: false, "Ask", "Allow", "Never"),
-        new TimelineSettings(Keyframes: false, Silences: false, Scenes: true, Snap: false));
+        new TimelineSettings(Keyframes: false, Silences: false, Scenes: true, Snap: false, Frames: true));
 
     private static void AssertSame(AppSettings expected, AppSettings actual)
     {

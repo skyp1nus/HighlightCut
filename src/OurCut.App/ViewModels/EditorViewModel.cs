@@ -350,6 +350,13 @@ public sealed partial class EditorViewModel : ViewModelBase
     [ObservableProperty]
     public partial bool ShowScenes { get; set; }
 
+    /// <summary>
+    /// Thumbnails on the video track; while on, they are made for every video opened (Settings: off at first, the player
+    /// shows the picture anyway). Off, the track is a plain strip and no thumbnails are made.
+    /// </summary>
+    [ObservableProperty]
+    public partial bool ShowFrames { get; set; }
+
     /// <summary>Silences and scene changes found so far (the toolbar chips are off without any).</summary>
     public bool HasSilenceData => Media?.Silences.Count > 0;
     public bool HasSceneData => Media?.SceneChanges.Count > 0;
@@ -393,6 +400,9 @@ public sealed partial class EditorViewModel : ViewModelBase
     private void ToggleScenes() => ShowScenes = !ShowScenes;
 
     [RelayCommand]
+    private void ToggleFrames() => ShowFrames = !ShowFrames;
+
+    [RelayCommand]
     private void ToggleSnap() => SnapToKeyframes = !SnapToKeyframes;
 
     /// <summary>Fit: the whole file in view.</summary>
@@ -418,6 +428,19 @@ public sealed partial class EditorViewModel : ViewModelBase
         ChipChanged();
     }
 
+    /// <summary>On: the open video's thumbnails are made (and every later one's). Off: an unfinished run stops.</summary>
+    partial void OnShowFramesChanged(bool value)
+    {
+        if (!_showingChips)
+        {
+            if (value)
+                Media?.ExtractThumbnails();
+            else
+                Media?.StopThumbnails();
+        }
+        ChipChanged();
+    }
+
     private bool _showingChips;
 
     /// <summary>
@@ -430,6 +453,7 @@ public sealed partial class EditorViewModel : ViewModelBase
         ShowKeyframes = chips.Keyframes;
         ShowSilences = chips.Silences;
         ShowScenes = chips.Scenes;
+        ShowFrames = chips.Frames;
         SnapToKeyframes = chips.Snap;
         ShowTranscriptLane = transcript;
         _showingChips = false;
@@ -440,7 +464,7 @@ public sealed partial class EditorViewModel : ViewModelBase
     {
         RaiseTimelineChanged();
         if (!_showingChips && !IsDemo)
-            Settings.SaveTimeline(new TimelineSettings(ShowKeyframes, ShowSilences, ShowScenes, SnapToKeyframes));
+            Settings.SaveTimeline(new TimelineSettings(ShowKeyframes, ShowSilences, ShowScenes, SnapToKeyframes, ShowFrames));
     }
 
     // ---- Totals and status ---------------------------------------------------------------
@@ -576,6 +600,8 @@ public sealed partial class EditorViewModel : ViewModelBase
             LoadCachedTranscript();
         if (ShowScenes)
             media.DetectScenes();
+        if (ShowFrames)
+            media.ExtractThumbnails();
         Processing.Track(IsDemo ? null : media, MediaFileName, info, project.SourceDuration);
     }
 

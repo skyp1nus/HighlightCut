@@ -78,6 +78,19 @@ public interface IMediaPreview
     {
     }
 
+    /// <summary>Thumbnails were asked for (the Frames chip); until then none are made.</summary>
+    bool ThumbnailsRequested => true;
+
+    /// <summary>Makes the timeline's thumbnails (or reads them from the cache) unless that is done or under way.</summary>
+    void ExtractThumbnails()
+    {
+    }
+
+    /// <summary>Stops making thumbnails (the Frames chip turned off): what was made so far is dropped.</summary>
+    void StopThumbnails()
+    {
+    }
+
     /// <summary>Silences with other settings; null if the file has no audio or they cannot be computed.</summary>
     /// <param name="streams">Audio streams (0-based) that must all be quiet; all if null.</param>
     SilenceAnalysis? FindSilences(double minDuration, double? thresholdDb, IReadOnlyList<int>? streams) => null;
@@ -101,7 +114,9 @@ public interface IMediaPreview
     /// </summary>
     string? Activity { get; }
 
-    /// <summary>Keyframes, thumbnails and the waveform are still being read (the processing screen shows meanwhile).</summary>
+    /// <summary>
+    /// Keyframes, the waveform and thumbnails (if asked for) are still being read (the processing screen shows meanwhile).
+    /// </summary>
     bool IsAnalysing => false;
 
     /// <summary>How far that reading is, 0..1.</summary>
