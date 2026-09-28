@@ -241,13 +241,17 @@ public class McpEditingTests
     public async Task Get_project_lists_the_source_and_clips_in_output_order()
     {
         var editor = new FakeEditor { Playhead = 12.5, SelectedClipId = 2 };
+        editor.Session.SetTrackMix(new TrackMix(2, -6.5, IsMuted: true));
         await using var c = await Connection.OpenAsync(editor);
 
         var p = (await c.Client.Call("get_project")).Json();
 
         Assert.Equal("keynote", p.GetProperty("name").GetString());
         Assert.Equal(600, p.GetProperty("source").GetProperty("duration").GetDouble());
-        Assert.Equal(["Mic", "Music"], p.GetProperty("source").GetProperty("audioTracks").EnumerateArray().Select(t => t.GetProperty("label").GetString()));
+        var tracks = p.GetProperty("source").GetProperty("audioTracks").EnumerateArray().ToList();
+        Assert.Equal(["Mic", "Music"], tracks.Select(t => t.GetProperty("label").GetString()));
+        Assert.Equal([0, -6.5], tracks.Select(t => t.GetProperty("volumeDb").GetDouble()));
+        Assert.Equal([false, true], tracks.Select(t => t.GetProperty("muted").GetBoolean()));
         Assert.Equal(130, p.GetProperty("outputDuration").GetDouble());
         Assert.Equal(12.5, p.GetProperty("playhead").GetDouble());
         Assert.Equal(2, p.GetProperty("selectedClip").GetInt32());

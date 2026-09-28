@@ -10,8 +10,8 @@ using OurCut.Transcription.Models;
 namespace OurCut.App.Tests;
 
 /// <summary>
-/// The timeline toolbar's chips: kept for every project and every run, and only what they show is worked out (scene
-/// changes while Scenes is on, a transcript while Transcript is on).
+/// The timeline toolbar's chips: kept for every project and every run, and only what they show is worked out (thumbnails
+/// while Frames is on, scene changes while Scenes is on, a transcript while Transcript is on).
 /// </summary>
 public sealed class TimelineChipsTests : IDisposable
 {
@@ -36,9 +36,10 @@ public sealed class TimelineChipsTests : IDisposable
     {
         var first = Start();
         Assert.True(first.ShowKeyframes && first.ShowSilences && first.SnapToKeyframes);
-        Assert.False(first.ShowScenes || first.ShowTranscriptLane);
+        Assert.False(first.ShowFrames || first.ShowScenes || first.ShowTranscriptLane);
         Assert.Equal("Show scene changes (finding them reads every frame, so it takes a while)", first.ScenesTip);
 
+        first.ToggleFramesCommand.Execute(null);
         first.ToggleKeyframesCommand.Execute(null);
         first.ToggleScenesCommand.Execute(null);
         first.ToggleSnapCommand.Execute(null);
@@ -46,9 +47,10 @@ public sealed class TimelineChipsTests : IDisposable
         Assert.Equal("Scene changes: found in every video you open", first.ScenesTip);
 
         var saved = new AppSettingsStore(SettingsFile).Load();
-        Assert.Equal(new TimelineSettings(Keyframes: false, Silences: true, Scenes: true, Snap: false), saved.Timeline);
+        Assert.Equal(new TimelineSettings(Keyframes: false, Silences: true, Scenes: true, Snap: false, Frames: true), saved.Timeline);
         Assert.True(saved.Transcription.TranscribeOnOpen);
         var second = Start();
+        Assert.True(second.ShowFrames);
         Assert.False(second.ShowKeyframes);
         Assert.True(second.ShowSilences);
         Assert.True(second.ScenesOn);
@@ -79,6 +81,46 @@ public sealed class TimelineChipsTests : IDisposable
         var next = Start(opener);
         await next.OpenMediaAsync("/videos/talk.mp4");
         Assert.Equal(1, opener.Last!.SceneSearches);
+    }
+
+    [AvaloniaFact]
+    public void A_settings_file_from_before_the_Frames_chip_reads_as_off()
+    {
+        File.WriteAllText(SettingsFile, """{ "transcription": {}, "timeline": { "keyframes": false, "scenes": true } }""");
+
+        var editor = Start();
+
+        Assert.False(editor.ShowFrames);
+        Assert.False(editor.ShowKeyframes);
+        Assert.True(editor.ShowScenes);
+    }
+
+    [AvaloniaFact]
+    public async Task Thumbnails_are_made_only_while_the_Frames_chip_is_on()
+    {
+        var opener = new CountingOpener();
+        var editor = Start(opener);
+        await editor.OpenMediaAsync("/videos/talk.mp4");
+        var talk = opener.Last!;
+        Assert.Equal(0, talk.ThumbnailRuns);
+        Assert.False(talk.ThumbnailsRequested);
+
+        editor.ToggleFramesCommand.Execute(null);
+        Assert.Equal(1, talk.ThumbnailRuns);
+        editor.ToggleFramesCommand.Execute(null);
+        Assert.Equal(1, talk.ThumbnailStops);
+        Assert.False(talk.ThumbnailsRequested);
+        await editor.OpenMediaAsync("/videos/other.mp4");
+        Assert.Equal(0, opener.Last!.ThumbnailRuns);
+
+        // On, every video opened after gets them as it opens, in this run and the next.
+        editor.ToggleFramesCommand.Execute(null);
+        await editor.OpenMediaAsync("/videos/third.mp4");
+        Assert.Equal(1, opener.Last!.ThumbnailRuns);
+        var next = Start(opener);
+        await next.OpenMediaAsync("/videos/talk.mp4");
+        Assert.Equal(1, opener.Last!.ThumbnailRuns);
+        Assert.Equal(0, opener.Last!.ThumbnailStops);
     }
 
     [AvaloniaFact]
@@ -117,7 +159,7 @@ public sealed class TimelineChipsTests : IDisposable
     {
         var editor = App.CreateEditor(DesignScreen.Editing, new CountingOpener());
         editor.Settings.Store = new AppSettingsStore(SettingsFile);
-        Assert.True(editor.ShowKeyframes && editor.ShowSilences && editor.ShowScenes && editor.SnapToKeyframes);
+        Assert.True(editor.ShowKeyframes && editor.ShowSilences && editor.ShowScenes && editor.ShowFrames && editor.SnapToKeyframes);
 
         editor.ToggleKeyframesCommand.Execute(null);
         Assert.False(File.Exists(SettingsFile));
@@ -127,6 +169,8 @@ public sealed class TimelineChipsTests : IDisposable
         Assert.False(editor.IsDemo);
         Assert.True(editor.ShowKeyframes);
         Assert.False(editor.ShowScenes);
+        Assert.False(editor.ShowFrames);
+        Assert.Equal(0, ((CountingOpener.Preview)editor.Media!).ThumbnailRuns);
         Assert.False(File.Exists(SettingsFile));
     }
 
@@ -147,6 +191,8 @@ public sealed class TimelineChipsTests : IDisposable
             public int SceneStops { get; private set; }
             public int Transcriptions { get; private set; }
             public int TranscriptionStops { get; private set; }
+            public int ThumbnailRuns { get; private set; }
+            public int ThumbnailStops { get; private set; }
 
             public double Duration => 10;
             public double FrameRate => 25;
@@ -158,6 +204,7 @@ public sealed class TimelineChipsTests : IDisposable
             public string? AnalysisError => null;
             public TranscriptState TranscriptState { get; private set; }
             public bool ScenesRequested { get; private set; }
+            public bool ThumbnailsRequested { get; private set; }
 
             public event EventHandler? Changed
             {
@@ -175,6 +222,18 @@ public sealed class TimelineChipsTests : IDisposable
             {
                 SceneStops++;
                 ScenesRequested = false;
+            }
+
+            public void ExtractThumbnails()
+            {
+                ThumbnailRuns++;
+                ThumbnailsRequested = true;
+            }
+
+            public void StopThumbnails()
+            {
+                ThumbnailStops++;
+                ThumbnailsRequested = false;
             }
 
             public void StartTranscription(TranscriptionSetup setup)

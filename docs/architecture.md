@@ -14,11 +14,15 @@ OurCut.Mcp    MCP tools, pipe server, bridge ───┘
 - **Model** (`OurCut.Core.Model`): immutable records. A `Project` has one `SourceMedia` (path, duration,
   frame rate, audio tracks) and an ordered list of `Clip`s. List order is output order. Times are
   seconds on the source timeline. Excluded clips (`IsIncluded = false`) stay in the project but are not exported.
+  `Project.AudioMix` holds a `TrackMix` (volume in dB, muted) for each audio track that is not at the default
+  (0 dB, unmuted), keyed by stream index. The volume runs from −40 dB, which means silent (−∞), to +12 dB.
 - **Commands** (`OurCut.Core.Editing`): every change is an `IEditCommand` that turns one `Project` into the
   next, or throws `EditException` with a readable reason. Commands never clamp or guess; callers do that.
 - **Session**: `EditorSession` holds the current project and a linear `History`. `Execute` applies a command
   and records it with its origin (`User` or `Assistant`). Edits sharing a merge key (one drag) become one
-  undo step. `Changed` fires after every edit, undo, redo and load.
+  undo step. `Changed` fires after every edit, undo, redo and load. `SetTrackMix` changes a track's volume or mute
+  (`ProjectChangeKind.Mixed`). That is a mixer setting, not an edit: it is saved with the project but not recorded
+  in the history, and undo and redo keep the current mix (as mute always behaved).
 - **Files**: `ProjectFile` reads and writes `.ourcut.json` (see below).
 
 The session is not thread-safe. The MCP server runs every tool call on the UI thread (see below).
@@ -74,11 +78,23 @@ single right answer, so the command refuses with an `EditException` and the UI s
 - **Export**: `ExportPlanner` turns the project and `ExportSettings` into an `ExportPlan` (every step, output
   and temporary file decided up front, so it can be tested and shown); `FfmpegCommands` builds each step's
   ffmpeg command with FFMpegCore; `ExportRunner` runs the steps with progress and cancellation.
+- **Audio levels** (`AudioLevels`): a rough loudness per stream from the waveform peaks (the power average of the
+  peaks above −45 dBFS) and the volumes that bring the streams to the average of their levels, a boost never passing
+  0 dBFS at the loudest peak. The editor's "Even out all tracks" uses it.
 
-In the App, `FfmpegMediaOpener` probes a file and creates a `MediaPreview`, which runs the three analyses in
+In the App, `FfmpegMediaOpener` probes a file and creates a `MediaPreview`, which runs the analyses in
 parallel (or reads them from the cache) and raises `Changed` as results arrive; the timeline redraws, and the
 keyframes are handed to the editing session for snapping. How long each part took, or that it came from the cache,
 is in Copy diagnostics ("Analysis keyframes 0.2 s · thumbnails 0.3 s · …").
+
+Keyframes (needed for lossless cuts) and the waveform are always read. Thumbnails are made only while the timeline's
+Frames chip is on (off at first: the player shows the picture anyway, and without them a 10-minute 1080p file opens in
+about 1.4 s instead of 2.1 s). The editor asks for them as it loads the file (`MediaPreview.ExtractThumbnails`), so
+they are then part of opening it: the processing screen and its progress include "Making thumbnails". Turned on later,
+the open file's are made in the background (status bar: "making thumbnails 40%"), or read from the cache at once.
+Turned off, a run under way stops (`StopThumbnails`) and keeps nothing of it, nothing cached; a finished set is kept
+in memory, only not drawn. With the chip off the video track is a plain strip of the same height, keyframe ticks and
+scene markers on it as before, and without thumbnails the player shows black until mpv's first frame.
 
 While that runs for more than 0.4 s, a processing screen covers the editor below the title bar (`ProcessingOverlay`,
 design "OurCut — екран обробки", X1): a slowly changing blob (`BlobView`, drawn every frame while shown), the file,
@@ -115,6 +131,16 @@ temporary name and moved over the old file once complete (`ExportPlan.Replacemen
 export leaves the old file as it was. Outputs never share a name, and an export never writes over its source.
 Temporary files (`.ourcut-tmp-*`) and any half-written output are removed on failure or cancel.
 
+Audio tracks are written as separate streams, never mixed, so a track's volume applies to its own stream
+(`ExportSettings.AudioGainsDb`, by stream index; `FfmpegCommands.AudioGains` maps it to the output's audio positions).
+A stream at 0 dB is left as the mode says. A stream with a volume goes through ffmpeg's `volume` filter, which needs
+decoding: where it would be copied (lossless, or re-encoding with audio set to Copy) only that stream is re-encoded,
+as AAC 192 kb/s (the re-encode choice, and a codec every output container takes), with `-filter:a:K` and
+`-c:a:K` while the video and the other streams are still copied. A lossless merge copies the pieces as they are
+and applies the volume once, in the concat step, so the re-encoded audio is continuous (no encoder priming at each
+join). A re-encoded merge puts a `volume` filter after the concat filter. A silent track (−40 dB) is kept, at
+`volume=0`; left out altogether it is only with "Only unmuted lanes" and the lane muted.
+
 In the app, "If the file exists" decides `Overwrite`: Add a number, Overwrite, or Ask, where the Export dialog lists
 the files that exist (`ExportViewModel.ExistingFiles`) and waits for Add a number or Overwrite before anything is
 written. Claude's exports always add a number. "After export: Show in folder" reveals the user's export
@@ -134,8 +160,13 @@ written. Claude's exports always add a number. "After export: Show in folder" re
   true; only the playback restart after the newest seek settles the position, so a dragged playhead never jumps
   back to stale positions. mpv can send that restart before the new `time-pos`, so the settled position stays the
   target until mpv reports the next one (`SeekState`).
-- **Audio tracks**: the timeline's lanes map to mpv's `aid1…N`. One unmuted lane plays directly (`aid`),
-  several are mixed with `lavfi-complex` (`amix`), none sets `aid=no`. Muting affects the preview only.
+- **Audio tracks**: the timeline's lanes map to mpv's `aid1…N` (`AudioMix`). One unmuted lane at 0 dB plays
+  directly (`aid`), none sets `aid=no`; anything else goes through `lavfi-complex`: a `volume` filter on each lane
+  whose volume is not 0 dB, then `amix` (`normalize=0`) when there are several, e.g.
+  `[aid1]volume=-6dB[g1];[g1][aid2]amix=inputs=2:normalize=0[ao]`. mpv rebuilds the graph whenever the property
+  changes (a short gap in the sound), so `SetAudioTracks` sends nothing when the mix is unchanged, and the editor
+  applies a volume slider's changes at most every 250 ms (`EditorViewModel.VolumeApplyDelay`); mute applies at once.
+  Muting leaves a lane out of the preview; an export leaves it out only with "Only unmuted lanes".
 - **Video** goes through the render API into OurCut's own view: `MpvOpenGlRenderer` draws into Avalonia's OpenGL
   framebuffer; `MpvSoftwareRenderer` renders BGRX frames into memory on a background thread. `vo=libmpv` without
   a render context fails the whole file, so the player uses `vo=null` until a renderer is attached and reopens
@@ -148,7 +179,7 @@ model keeps the playhead: user moves become seeks, the player's positions come b
 again. On `TimelineControl` a press moves the playhead to the time under the pointer anywhere on the ruler or the
 tracks (the whole control takes the pointer, not just what it drew); it only becomes a scrub or a trim once the pointer
 has moved 4 px, so a click on a trim handle seeks and selects that clip. `VideoView` shows the video (OpenGL first, software if OpenGL is not there within two seconds or fails);
-until its first frame the thumbnail preview underneath shows through. mpv allows one render context per player and
+until its first frame the thumbnail preview underneath shows through (black if no thumbnails were made). mpv allows one render context per player and
 refuses a second one while the old exists, so the software view keeps trying for a few seconds while the OpenGL view
 it replaces lets go. `VideoView.Output` tells the editor what draws the video ("OpenGL · " and the GPU as the
 driver names it, "software", or "none: why", which puts a message in the status bar rather than leaving blurry
@@ -205,7 +236,7 @@ Claude ──stdio──> OurCut.exe mcp (McpBridge) ──named pipe──> Our
 
 | Tool | Does |
 | --- | --- |
-| `get_project` | Source, playhead, selection and clips in output order |
+| `get_project` | Source (with each audio track's volume and mute), playhead, selection and clips in output order |
 | `get_history` | Recent edits (user's and Claude's) with ids for `revert_action` |
 | `find_keyframes` | Keyframe times in a range (lossless cuts start on them) |
 | `find_silences` | Pauses at a minimum length and level (automatic by default), on all or some audio tracks |
@@ -240,6 +271,11 @@ bind to view models and never change the project themselves.
   cut out (`CutWords`, a `CutRangesCommand`), each one undo step through `EditorSession`. Without a model the tab
   offers Parakeet's download (Retry after a failed one, and why it does not fit when there is no space) and transcribes
   the video once it is installed.
+- **Audio lanes**: one per audio stream (`AudioLaneViewModel`, `EditorViewModel.Audio.cs`). The header has the
+  mute button (A1, A2, …), a volume slider from −∞ (−40) to +12 dB in 0.5 dB steps, and the value in dB; the wheel
+  moves it half a decibel, a double-click resets it to 0 dB, and the right-click menu has Reset volume and Even out
+  all tracks. Each lane mirrors the project's `TrackMix` both ways; the waveform is drawn at the lane's volume
+  (`WaveformData.WithGain`) and a muted lane at 30 % opacity. Changes mark the project unsaved and autosave it.
 - **Transcript lane**: the timeline's TX row (`ShowTranscriptLane`) is drawn by `TimelineControl.DrawTranscriptLane`,
   words packed by width from the start of each chunk. A click there seeks to a word; it never splits or trims.
 - **Claude's export**: `IEditorContext.StartExportAsync` (`EditorMcpHost`) fills the export settings from the request
@@ -278,7 +314,7 @@ bind to view models and never change the project themselves.
   source-generated JSON, enums by name (`LenientEnumConverter`). A section missing from the file (an older version
   wrote it, or it is at its defaults) reads as null and means the defaults; a value this version does not know falls
   back to its default, and the rest of the file is kept.
-  `Timeline` is the timeline toolbar's chips (Keyframes, Silence, Scenes, Snap), saved as they are clicked and put
+  `Timeline` is the timeline toolbar's chips (Frames, Keyframes, Silence, Scenes, Snap), saved as they are clicked and put
   back for every project and run (`SettingsViewModel.ApplyTimeline`); the design's screens show them all and save none.
   Playback is read before the player is created, which starts with the saved decoding and audio device. Changes apply
   while it plays: `IPlayer.SetHardwareDecoding` (mpv `hwdec`), `SetAudioDevice` (`audio-device`, one of
@@ -365,7 +401,7 @@ and Whisper large-v3-turbo, small and base.en (99 languages; base.en English onl
     "path": "media/keynote_final_4k.mp4",
     "duration": 872.48,
     "frameRate": 29.97,
-    "audioStreams": [ { "index": 1, "label": "Mic" } ]
+    "audioStreams": [ { "index": 1, "label": "Mic" }, { "index": 2, "label": "Game", "gainDb": -6, "muted": true } ]
   },
   "clips": [
     { "id": 1, "label": "Intro", "start": 12.04, "end": 45.32, "included": true }
@@ -375,5 +411,7 @@ and Whisper large-v3-turbo, small and base.en (99 languages; base.en English onl
 
 - `path` is relative to the project file when the video is on the same drive, otherwise absolute.
 - Times are seconds with an invariant decimal point.
+- `gainDb` (a track's volume) and `muted` are left out at their defaults (0 dB, not muted), so files from before
+  they existed load with every track at 0 dB. Out-of-range volumes are clamped to −40…+12 dB.
 - Readers ignore unknown fields. Files with a higher `version` than the app supports are rejected.
 - Files are written atomically (temporary file, then replace). A saved project is autosaved after edits.

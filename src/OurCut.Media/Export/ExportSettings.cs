@@ -61,6 +61,12 @@ public sealed record ExportSettings
     /// <summary>Container stream indexes of the audio to keep when <see cref="KeepAllTracks"/> is false.</summary>
     public IReadOnlyList<int> AudioStreamIndexes { get; init; } = [];
 
+    /// <summary>
+    /// Volume in dB of the audio streams that do not play at 0 dB, by container stream index. Such a stream is
+    /// re-encoded (AAC when it would otherwise be copied); every other stream is left as the mode says.
+    /// </summary>
+    public IReadOnlyDictionary<int, double> AudioGainsDb { get; init; } = new Dictionary<int, double>();
+
     public required string OutputFolder { get; init; }
 
     /// <summary>Base of the output file names, usually the project name: the pattern's {project}.</summary>

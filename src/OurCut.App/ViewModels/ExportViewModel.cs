@@ -316,15 +316,25 @@ public sealed partial class ExportViewModel : ViewModelBase
         {
             var keyframes = _editor.Media?.Keyframes ?? [];
             var on = Included;
+            string note;
             if (keyframes.Count == 0)
-                return "In points snap back to the previous keyframe. Out points stay exact.";
-            var shifts = on.Select(c => c.Start - (keyframes.LastOrDefault(k => k <= c.Start + 1e-6)))
-                .Where(d => d > 0.0005).ToList();
-            return shifts.Count == 0
-                ? "All in points already sit on keyframes."
-                : $"{shifts.Count} of {on.Count} in points will snap back to the previous keyframe (up to {shifts.Max().ToString("0.000", CultureInfo.InvariantCulture)} s earlier). Out points stay exact.";
+            {
+                note = "In points snap back to the previous keyframe. Out points stay exact.";
+            }
+            else
+            {
+                var shifts = on.Select(c => c.Start - (keyframes.LastOrDefault(k => k <= c.Start + 1e-6)))
+                    .Where(d => d > 0.0005).ToList();
+                note = shifts.Count == 0
+                    ? "All in points already sit on keyframes."
+                    : $"{shifts.Count} of {on.Count} in points will snap back to the previous keyframe (up to {shifts.Max().ToString("0.000", CultureInfo.InvariantCulture)} s earlier). Out points stay exact.";
+            }
+            return HasVolumeChanges ? note + " Audio tracks with a changed volume are re-encoded (AAC 192 kb/s); the video is still copied." : note;
         }
     }
+
+    /// <summary>An audio track the export keeps plays at another volume than 0 dB.</summary>
+    private bool HasVolumeChanges => _editor.AudioLanes.Any(l => l.GainDb != 0 && (KeepAllTracks || !l.IsMuted));
 
     /// <summary>The line above the progress bar: "Writing clip 2 of 4", "Concatenating 4 clips", "Export complete".</summary>
     public string ProgressText
@@ -770,6 +780,7 @@ public sealed partial class ExportViewModel : ViewModelBase
             KeepAllTracks = KeepAllTracks,
             // Muted lanes are left out unless every track is kept.
             AudioStreamIndexes = [.. _editor.AudioLanes.Where(l => !l.IsMuted && l.Stream < tracks.Length).Select(l => tracks[l.Stream].Index)],
+            AudioGainsDb = _editor.Session.Project.AudioMix.Where(m => m.GainDb != 0).ToDictionary(m => m.Index, m => m.GainDb),
             OutputFolder = OutputFolder,
             BaseName = BaseName,
             FileNamePattern = Pattern,

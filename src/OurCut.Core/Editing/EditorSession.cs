@@ -10,6 +10,9 @@ public enum ProjectChangeKind
     Edited,
     Undone,
     Redone,
+
+    /// <summary>A track's volume or mute changed (<see cref="EditorSession.SetTrackMix"/>); not in the history.</summary>
+    Mixed,
 }
 
 public sealed class ProjectChangedEventArgs(ProjectChangeKind kind, Project previous, Project current, HistoryEntry? entry)
@@ -84,7 +87,7 @@ public sealed class EditorSession
         if (entry is null)
             return false;
         var previous = Project;
-        Project = entry.Before;
+        Project = KeepMix(entry.Before, previous);
         Changed?.Invoke(this, new ProjectChangedEventArgs(ProjectChangeKind.Undone, previous, Project, entry));
         return true;
     }
@@ -95,10 +98,30 @@ public sealed class EditorSession
         if (entry is null)
             return false;
         var previous = Project;
-        Project = entry.After;
+        Project = KeepMix(entry.After, previous);
         Changed?.Invoke(this, new ProjectChangedEventArgs(ProjectChangeKind.Redone, previous, Project, entry));
         return true;
     }
+
+    /// <summary>
+    /// Sets one audio track's volume and mute. Like the mute toggle this is a mixer setting, not an edit: it is saved
+    /// with the project but not recorded in <see cref="History"/>, and undo and redo leave it as it is.
+    /// </summary>
+    /// <returns>False if nothing changed.</returns>
+    public bool SetTrackMix(TrackMix mix)
+    {
+        var before = Project;
+        var after = before.WithMix(mix with { GainDb = TrackMix.ClampGain(mix.GainDb) });
+        if (ReferenceEquals(after, before))
+            return false;
+        Project = after;
+        Changed?.Invoke(this, new ProjectChangedEventArgs(ProjectChangeKind.Mixed, before, after, null));
+        return true;
+    }
+
+    /// <summary>A project from the history with the mix the user has now.</summary>
+    private static Project KeepMix(Project fromHistory, Project current) =>
+        ReferenceEquals(fromHistory.AudioMix, current.AudioMix) ? fromHistory : fromHistory with { AudioMix = current.AudioMix };
 
     /// <summary>Undoes <paramref name="entry"/> and everything after it.</summary>
     public void UndoThrough(HistoryEntry entry)

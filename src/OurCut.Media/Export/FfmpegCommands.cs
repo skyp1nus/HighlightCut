@@ -15,13 +15,18 @@ public static class FfmpegCommands
     public static FFMpegArgumentProcessor ForStep(ExportPlan plan, ExportStep step) => step.Kind switch
     {
         ExportStepKind.Cut => LosslessCut(plan.Source, step.Clips[0], plan.Settings, step.OutputPath, final: !step.IsTemporary),
-        ExportStepKind.Concat => Concat(plan.ConcatListPath!, plan.ChaptersPath, plan.Settings, step.OutputPath),
+        ExportStepKind.Concat => Concat(plan.ConcatListPath!, plan.ChaptersPath, plan.Settings, step.OutputPath,
+            AudioGains(plan.Source, plan.Settings)),
         ExportStepKind.Encode => EncodeClip(plan.Source, step.Clips[0], plan.Settings, step.OutputPath),
         ExportStepKind.EncodeMerged => EncodeMerged(plan.Source, step.Clips, plan.Settings, plan.ChaptersPath, step.OutputPath),
         _ => throw new ArgumentOutOfRangeException(nameof(step)),
     };
 
     /// <summary>Stream copy of one clip: <c>-ss</c> before <c>-i</c> (fast, starts at a keyframe), <c>-t</c> after.</summary>
+    /// <param name="final">
+    /// The clip's own output. Only that one changes audio volume: the pieces of a merge are copied as they are, and
+    /// the volume is applied once when they are joined, so the re-encoded audio has no gaps at the joins.
+    /// </param>
     public static FFMpegArgumentProcessor LosslessCut(MediaInfo source, ExportClip clip, ExportSettings settings, string output, bool final)
     {
         var cut = clip.Lossless ?? throw new ArgumentException("The clip has no lossless cut points.", nameof(clip));
@@ -33,6 +38,11 @@ public static class FfmpegCommands
                 foreach (string map in StreamMaps(source, settings))
                     o.WithCustomArgument(map);
                 o.WithCustomArgument("-c copy");
+                if (final)
+                {
+                    foreach (string gain in GainArguments(AudioGains(source, settings), reencode: true))
+                        o.WithCustomArgument(gain);
+                }
                 // The kept lead-in before -ss gets negative timestamps; shift them to start at zero.
                 if (cut.SeekTo > 0)
                     o.WithCustomArgument("-avoid_negative_ts make_zero");
@@ -45,7 +55,9 @@ public static class FfmpegCommands
     }
 
     /// <summary>Joins cut clips losslessly with the concat demuxer, optionally adding chapters.</summary>
-    public static FFMpegArgumentProcessor Concat(string listPath, string? chaptersPath, ExportSettings settings, string output)
+    /// <param name="audioGains">Audio streams to change the volume of (<see cref="AudioGains"/>); only these are re-encoded.</param>
+    public static FFMpegArgumentProcessor Concat(string listPath, string? chaptersPath, ExportSettings settings, string output,
+        IReadOnlyList<(int Position, double GainDb)>? audioGains = null)
     {
         var args = FFMpegArguments.FromFileInput(listPath, verifyExists: false, o => o.WithCustomArgument("-f concat -safe 0"));
         if (chaptersPath is not null)
@@ -54,6 +66,8 @@ public static class FfmpegCommands
             .OutputToFile(output, overwrite: true, o =>
             {
                 o.WithCustomArgument("-map 0 -c copy -map_metadata 0");
+                foreach (string gain in GainArguments(audioGains ?? [], reencode: true))
+                    o.WithCustomArgument(gain);
                 if (chaptersPath is not null)
                     o.WithCustomArgument("-map_chapters 1");
                 if (settings.IsMovLike)
@@ -74,6 +88,8 @@ public static class FfmpegCommands
                     o.WithCustomArgument(map);
                 foreach (string codec in Codecs(source, settings, merged: false))
                     o.WithCustomArgument(codec);
+                foreach (string gain in GainArguments(AudioGains(source, settings), reencode: settings.Audio.IsCopy))
+                    o.WithCustomArgument(gain);
                 // Copied streams (audio set to "copy", subtitles) would otherwise start at the keyframe
                 // before the in-point, leaving a lead-in that Matroska keeps.
                 o.WithCustomArgument("-copypriorss 0");
@@ -105,7 +121,8 @@ public static class FfmpegCommands
             args = args!.AddFileInput(chaptersPath, verifyExists: false, o => o.WithCustomArgument("-f ffmetadata"));
 
         var audio = SelectedAudio(source, settings);
-        string graph = ConcatFilter(clips.Count, source.Video is not null, audio.Select(a => a.Position).ToList());
+        string graph = ConcatFilter(clips.Count, source.Video is not null, audio.Select(a => a.Position).ToList(),
+            audio.Select(a => settings.AudioGainsDb.GetValueOrDefault(a.Index)).ToList());
         return args!
             .OutputToFile(output, overwrite: true, o =>
             {
@@ -127,10 +144,13 @@ public static class FfmpegCommands
     }
 
     /// <summary>
-    /// <c>[0:v:0][0:a:0][1:v:0][1:a:0]concat=n=2:v=1:a=1[v][a0]</c> for the given audio positions.
+    /// <c>[0:v:0][0:a:0][1:v:0][1:a:0]concat=n=2:v=1:a=1[v][a0]</c> for the given audio positions. An audio stream with
+    /// a gain leaves the concat as <c>[c0]</c> and goes through a volume filter: <c>;[c0]volume=-6dB[a0]</c>.
     /// </summary>
-    public static string ConcatFilter(int inputs, bool video, IReadOnlyList<int> audioPositions)
+    /// <param name="gainsDb">Volume of each audio stream in dB, in the order of <paramref name="audioPositions"/>; 0 dB if null.</param>
+    public static string ConcatFilter(int inputs, bool video, IReadOnlyList<int> audioPositions, IReadOnlyList<double>? gainsDb = null)
     {
+        double Gain(int k) => gainsDb is not null && k < gainsDb.Count ? gainsDb[k] : 0;
         var sb = new StringBuilder();
         for (int i = 0; i < inputs; i++)
         {
@@ -143,8 +163,38 @@ public static class FfmpegCommands
         if (video)
             sb.Append("[v]");
         for (int k = 0; k < audioPositions.Count; k++)
-            sb.Append(CultureInfo.InvariantCulture, $"[a{k}]");
+            sb.Append(CultureInfo.InvariantCulture, $"[{(Gain(k) == 0 ? 'a' : 'c')}{k}]");
+        for (int k = 0; k < audioPositions.Count; k++)
+        {
+            if (Gain(k) != 0)
+                sb.Append(CultureInfo.InvariantCulture, $";[c{k}]{FfmpegText.VolumeFilter(Gain(k))}[a{k}]");
+        }
         return sb.ToString();
+    }
+
+    /// <summary>
+    /// The kept audio streams whose volume changes: their position among the output's audio streams (the <c>K</c> of
+    /// <c>-filter:a:K</c>) and their gain in dB.
+    /// </summary>
+    public static IReadOnlyList<(int Position, double GainDb)> AudioGains(MediaInfo source, ExportSettings settings) =>
+        [.. SelectedAudio(source, settings)
+            .Select((a, k) => (Position: k, GainDb: settings.AudioGainsDb.GetValueOrDefault(a.Index)))
+            .Where(g => g.GainDb != 0)];
+
+    /// <summary>
+    /// <c>-filter:a:K volume=…</c> for each stream with a gain, plus <c>-c:a:K aac -b:a:K 192k</c> when the stream
+    /// would otherwise be copied: filtering needs decoding, so only that stream is re-encoded and the rest still copied.
+    /// </summary>
+    private static IEnumerable<string> GainArguments(IReadOnlyList<(int Position, double GainDb)> gains, bool reencode)
+    {
+        var aac = AudioEncoding.Aac192;
+        foreach (var (k, gain) in gains)
+        {
+            string p = k.ToString(CultureInfo.InvariantCulture);
+            yield return $"-filter:a:{p} {FfmpegText.VolumeFilter(gain)}";
+            if (reencode)
+                yield return $"-c:a:{p} {aac.Codec} -b:a:{p} {aac.BitrateKbps.ToString(CultureInfo.InvariantCulture)}k";
+        }
     }
 
     /// <summary><c>-map</c> options: the video stream, the kept audio streams and the subtitles the output can hold.</summary>

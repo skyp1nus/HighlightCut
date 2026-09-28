@@ -21,6 +21,24 @@ public sealed record Project(string Name, SourceMedia? Source, ImmutableList<Cli
 
     public static Project Empty { get; } = new("Untitled project", null, []);
 
+    /// <summary>
+    /// Volume and mute of the audio tracks that differ from the default (0 dB, unmuted), by stream index. The mix is
+    /// not part of the undo history (see <see cref="EditorSession.SetTrackMix"/>).
+    /// </summary>
+    public ImmutableList<TrackMix> AudioMix { get; init; } = [];
+
+    /// <summary>The mix of the audio stream with container index <paramref name="index"/>.</summary>
+    public TrackMix MixOf(int index) => AudioMix.Find(m => m.Index == index) ?? new TrackMix(index);
+
+    /// <summary>The project with <paramref name="mix"/> for its track; a default mix removes the entry.</summary>
+    public Project WithMix(TrackMix mix)
+    {
+        var list = AudioMix.RemoveAll(m => m.Index == mix.Index);
+        if (!mix.IsDefault)
+            list = list.Add(mix).Sort((a, b) => a.Index.CompareTo(b.Index));
+        return list.SequenceEqual(AudioMix) ? this : this with { AudioMix = list };
+    }
+
     public double SourceDuration => Source?.Duration ?? 0;
 
     public IEnumerable<Clip> IncludedClips => Clips.Where(c => c.IsIncluded);
