@@ -64,8 +64,8 @@ public readonly record struct AudioMix(string AudioTrack, string LavfiComplex)
 /// </summary>
 /// <remarks>
 /// Seeks are exact (<c>hr-seek</c>). While a seek is in flight, <see cref="Position"/> keeps the
-/// target and <see cref="IsSeeking"/> is true, so a playhead the user is dragging does not jump
-/// back to stale positions.
+/// target and <see cref="IsSeeking"/> is true, and it stays the target after the seek lands until mpv
+/// reports the next position, so the playhead does not jump back to stale positions (<see cref="SeekState"/>).
 /// </remarks>
 public sealed class MpvPlayer : IDisposable
 {
@@ -84,7 +84,7 @@ public sealed class MpvPlayer : IDisposable
     /// </summary>
     private string? _openPath;
     private readonly SeekState _seeks = new();
-    private double _position, _seekTarget, _duration;
+    private double _duration;
     private volatile bool _paused = true, _eof, _disposed;
     private int _videoWidth, _videoHeight;
     private string? _decoder;
@@ -151,7 +151,7 @@ public sealed class MpvPlayer : IDisposable
     internal IntPtr Handle { get; }
 
     /// <summary>Playback position in seconds from the file's start; the seek target while seeking.</summary>
-    public double Position => _seeks.IsSeeking ? Volatile.Read(ref _seekTarget) : Volatile.Read(ref _position);
+    public double Position => _seeks.Position;
 
     public double Duration => Volatile.Read(ref _duration);
     public bool IsPlaying => !_paused && !_eof && LoadedPath is not null;
@@ -216,8 +216,7 @@ public sealed class MpvPlayer : IDisposable
     /// <summary>Exact seek to a source time.</summary>
     public void Seek(double time)
     {
-        Volatile.Write(ref _seekTarget, time);
-        long generation = _seeks.Request();
+        long generation = _seeks.Request(time);
         _eof = false;
         Command(SeekTag | (ulong)generation, "seek", Seconds(time), "absolute+exact");
     }
@@ -452,7 +451,7 @@ public sealed class MpvPlayer : IDisposable
         switch (id)
         {
             case TimePosId:
-                Volatile.Write(ref _position, has ? *(double*)property.Data : 0);
+                _seeks.Reported(has ? *(double*)property.Data : 0);
                 if (_seeks.IsSeeking)
                     return;
                 break;
