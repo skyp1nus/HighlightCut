@@ -359,7 +359,7 @@ public class McpEditingTests
     }
 
     [Fact]
-    public async Task Clips_have_unique_names_and_colours_claude_can_set()
+    public async Task Clips_cannot_overlap_through_claudes_edits()
     {
         var editor = new FakeEditor();
         await using var c = await Connection.OpenAsync(editor);
