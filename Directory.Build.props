@@ -6,9 +6,9 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <AnalysisLevel>latest-recommended</AnalysisLevel>
-    <Authors>OurCut contributors</Authors>
-    <Product>OurCut</Product>
-    <Copyright>Copyright (C) OurCut contributors</Copyright>
+    <Authors>HighlightCut contributors</Authors>
+    <Product>HighlightCut</Product>
+    <Copyright>Copyright (C) HighlightCut contributors</Copyright>
     <PackageLicenseExpression>GPL-3.0-or-later</PackageLicenseExpression>
     <InvariantGlobalization>false</InvariantGlobalization>
   </PropertyGroup>

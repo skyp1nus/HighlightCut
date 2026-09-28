@@ -40,11 +40,11 @@ jobs:
         run: ./scripts/fetch-deps.ps1 -Check
 
       - name: Build
-        run: dotnet build OurCut.slnx -c Release
+        run: dotnet build HighlightCut.slnx -c Release
 
       # --blame names the test that was running if a test process crashes.
       - name: Test
-        run: dotnet test OurCut.slnx -c Release --no-build --blame
+        run: dotnet test HighlightCut.slnx -c Release --no-build --blame
 
       - name: Upload UI screenshots
         if: always()
@@ -54,19 +54,19 @@ jobs:
           path: artifacts/screenshots/
           if-no-files-found: ignore
 
-      # A ready-to-run folder with ffmpeg and libmpv: unzip and start OurCut.exe (no .NET install needed).
+      # A ready-to-run folder with ffmpeg and libmpv: unzip and start HighlightCut.exe (no .NET install needed).
       - name: Publish the app (win-x64)
         shell: pwsh
         run: |
           $version = if ($env:GITHUB_REF_TYPE -eq 'tag') { $env:GITHUB_REF_NAME.TrimStart('v') } else { '0.1.0-dev' }
-          dotnet publish src/OurCut.App -c Release -r win-x64 --self-contained -p:PublishReadyToRun=true `
-            -p:Version=$version -o artifacts/OurCut-win-x64
+          dotnet publish src/HighlightCut.App -c Release -r win-x64 --self-contained -p:PublishReadyToRun=true `
+            -p:Version=$version -o artifacts/HighlightCut-win-x64
 
       - name: Upload the app
         uses: actions/upload-artifact@v4
         with:
-          name: OurCut-win-x64
-          path: artifacts/OurCut-win-x64/
+          name: HighlightCut-win-x64
+          path: artifacts/HighlightCut-win-x64/
           if-no-files-found: error
           retention-days: 14
 
@@ -83,11 +83,11 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y ffmpeg libmpv2
 
       - name: Build
-        run: dotnet build OurCut.slnx -c Release
+        run: dotnet build HighlightCut.slnx -c Release
 
       # --blame names the test that was running if a test process crashes.
       - name: Test
-        run: dotnet test OurCut.slnx -c Release --no-build --blame
+        run: dotnet test HighlightCut.slnx -c Release --no-build --blame
 
       - name: Upload UI screenshots
         if: always()
@@ -107,14 +107,14 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
-          name: OurCut-win-x64
-          path: OurCut-win-x64
+          name: HighlightCut-win-x64
+          path: HighlightCut-win-x64
 
       - name: Create the release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          archive="OurCut-${GITHUB_REF_NAME}-win-x64.zip"
-          (cd OurCut-win-x64 && zip -qr9 "../$archive" .)
+          archive="HighlightCut-${GITHUB_REF_NAME}-win-x64.zip"
+          (cd HighlightCut-win-x64 && zip -qr9 "../$archive" .)
           gh release create "$GITHUB_REF_NAME" "$archive" --repo "$GITHUB_REPOSITORY" \
-            --title "OurCut $GITHUB_REF_NAME" --generate-notes
+            --title "HighlightCut $GITHUB_REF_NAME" --generate-notes

@@ -1,0 +1,154 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:HighlightCut.App.ViewModels"
+             xmlns:c="using:HighlightCut.App.Controls"
+             x:Class="HighlightCut.App.Views.Settings.KeyboardSection"
+             x:DataType="vm:SettingsViewModel">
+  <!-- Shortcut list with search, recording and conflicts. -->
+  <UserControl.Resources>
+    <SolidColorBrush x:Key="KbRowSelectedBrush" Color="#0AFFFFFF" />
+  </UserControl.Resources>
+
+  <UserControl.Styles>
+    <Style Selector="Border.kbrow">
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="BorderBrush" Value="{StaticResource DividerSoftBrush}" />
+      <Setter Property="BorderThickness" Value="0,1,0,0" />
+    </Style>
+    <Style Selector="Border.kbrow.sel">
+      <Setter Property="Background" Value="{StaticResource KbRowSelectedBrush}" />
+    </Style>
+    <Style Selector="TextBlock.kbname">
+      <Setter Property="Foreground" Value="{StaticResource Text2Brush}" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+    <Style Selector="Border.kbrow.sel TextBlock.kbname">
+      <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
+    </Style>
+    <!-- The clickable top line of a row: selects it. -->
+    <Style Selector="Button.kbselect">
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="CornerRadius" Value="0" />
+      <Setter Property="MinHeight" Value="38" />
+      <Setter Property="Padding" Value="10,0,8,0" />
+      <Setter Property="HorizontalAlignment" Value="Stretch" />
+      <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+      <Setter Property="FontWeight" Value="Normal" />
+      <Setter Property="Cursor" Value="Arrow" />
+    </Style>
+    <Style Selector="Button.kbact">
+      <Setter Property="Height" Value="22" />
+      <Setter Property="Padding" Value="9,0" />
+      <Setter Property="CornerRadius" Value="6" />
+      <Setter Property="FontSize" Value="11" />
+      <Setter Property="FontWeight" Value="Normal" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+    <Style Selector="Button.kbact.quiet">
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="Foreground" Value="{StaticResource Text2Brush}" />
+    </Style>
+    <Style Selector="Button.kbact.quiet:pointerover">
+      <Setter Property="Background" Value="{StaticResource ControlBrush}" />
+    </Style>
+    <!-- "Press the new shortcut…" / the clashing key, with a blue ring. -->
+    <Style Selector="Border.recpill">
+      <Setter Property="Height" Value="24" />
+      <Setter Property="Padding" Value="8,0" />
+      <Setter Property="CornerRadius" Value="6" />
+      <Setter Property="Background" Value="{StaticResource WindowBrush}" />
+      <Setter Property="BorderBrush" Value="{StaticResource AccentBrush}" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+  </UserControl.Styles>
+
+  <StackPanel DataContext="{Binding Keyboard}">
+    <StackPanel x:DataType="vm:KeyboardSettingsViewModel">
+      <Grid ColumnDefinitions="*,8,Auto" Margin="0,12,0,4">
+        <Panel>
+          <TextBox Name="Search" Classes="search" Text="{Binding Query}" PlaceholderText="Search shortcuts" />
+          <c:SvgIcon Data="{StaticResource IconSearch12}" ViewBox="12" StrokeWidth="1.2" LineCap="Flat" Width="12" Height="12"
+                     Margin="10,0,0,0" HorizontalAlignment="Left" VerticalAlignment="Center" Foreground="{StaticResource MutedBrush}"
+                     IsHitTestVisible="False" />
+        </Panel>
+        <Button Grid.Column="2" Classes="soft" Height="30" Padding="12,0" Content="Reset all to defaults"
+                Command="{Binding ResetAllCommand}" />
+      </Grid>
+
+      <ItemsControl ItemsSource="{Binding Groups}">
+        <ItemsControl.ItemTemplate>
+          <DataTemplate x:DataType="vm:ShortcutGroupViewModel">
+            <StackPanel IsVisible="{Binding IsMatch}">
+              <TextBlock Classes="groupTitle" Text="{Binding Label}" Margin="0,16,0,6" />
+              <ItemsControl ItemsSource="{Binding Rows}">
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate x:DataType="vm:ShortcutRowViewModel">
+                    <!-- Focusable so recording can take focus off the search box. -->
+                    <Border Classes="kbrow" Classes.sel="{Binding IsSelected}" IsVisible="{Binding IsMatch}" Focusable="True"
+                            IsTabStop="False" FocusAdorner="{x:Null}">
+                      <StackPanel>
+                        <Button Classes="kbselect" Command="{Binding SelectCommand}">
+                          <Grid ColumnDefinitions="*,12,Auto">
+                            <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                              <TextBlock Classes="kbname" Text="{Binding Name}" />
+                              <TextBlock Text="changed" FontSize="10.5" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center"
+                                         IsVisible="{Binding IsModified}" />
+                            </StackPanel>
+                            <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                              <ItemsControl ItemsSource="{Binding Chips}" IsVisible="{Binding ShowKeys}" VerticalAlignment="Center">
+                                <ItemsControl.ItemsPanel>
+                                  <ItemsPanelTemplate>
+                                    <StackPanel Orientation="Horizontal" Spacing="6" />
+                                  </ItemsPanelTemplate>
+                                </ItemsControl.ItemsPanel>
+                                <ItemsControl.ItemTemplate>
+                                  <DataTemplate x:DataType="vm:KeyChip">
+                                    <StackPanel Orientation="Horizontal" Spacing="6">
+                                      <TextBlock Text="or" FontSize="11" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center"
+                                                 IsVisible="{Binding ShowOr}" />
+                                      <Border Classes="kbd key">
+                                        <TextBlock Text="{Binding Label}" />
+                                      </Border>
+                                    </StackPanel>
+                                  </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                              </ItemsControl>
+                              <TextBlock Text="Not set" FontSize="11" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center"
+                                         IsVisible="{Binding IsNotSet}" />
+                              <Border Classes="recpill" IsVisible="{Binding ShowPill}">
+                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                  <c:PulseDot Width="6" Height="6" Fill="{StaticResource TextBrush}" VerticalAlignment="Center"
+                                              IsVisible="{Binding IsRecording}" />
+                                  <TextBlock Classes="mono" FontSize="11" Text="{Binding PillText}" Foreground="{StaticResource TextBrush}"
+                                             VerticalAlignment="Center" />
+                                  <TextBlock Text="Esc cancels" FontSize="11.5" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center" />
+                                </StackPanel>
+                              </Border>
+                              <Button Classes="white kbact" Margin="4,0,0,0" Content="Change" IsVisible="{Binding ShowActions}"
+                                      Command="{Binding ChangeCommand}" />
+                              <Button Classes="white kbact quiet" Content="Reset" IsVisible="{Binding ShowActions}" Opacity="{Binding ResetOpacity}"
+                                      Command="{Binding ResetCommand}" />
+                            </StackPanel>
+                          </Grid>
+                        </Button>
+                        <Grid ColumnDefinitions="*,8,Auto,8,Auto" Margin="10,0,8,10" IsVisible="{Binding HasConflict}">
+                          <TextBlock Text="{Binding ConflictText}" FontSize="11.5" Foreground="{StaticResource TextBrush}" VerticalAlignment="Center"
+                                     TextWrapping="Wrap" />
+                          <Button Grid.Column="2" Classes="white kbact" Content="Replace" Command="{Binding ReplaceCommand}" />
+                          <Button Grid.Column="4" Classes="white kbact quiet" Content="Cancel" Command="{Binding CancelConflictCommand}" />
+                        </Grid>
+                      </StackPanel>
+                    </Border>
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+            </StackPanel>
+          </DataTemplate>
+        </ItemsControl.ItemTemplate>
+      </ItemsControl>
+
+      <TextBlock Margin="0,24" FontSize="12" Foreground="{StaticResource MutedBrush}" Text="{Binding EmptyText}" IsVisible="{Binding IsEmpty}" />
+    </StackPanel>
+  </StackPanel>
+</UserControl>

@@ -1,0 +1,33 @@
+<Project>
+  <!--
+    Copies the native binaries downloaded by scripts/fetch-deps.ps1 (ffmpeg, ffprobe, libmpv)
+    from deps/<rid>/ into the app's output and publish folders.
+    Missing binaries only produce a warning, so Core, Media and the tests still build without them.
+  -->
+  <PropertyGroup>
+    <_HighlightCutOs Condition="$([MSBuild]::IsOSPlatform('Windows'))">win</_HighlightCutOs>
+    <_HighlightCutOs Condition="'$(_HighlightCutOs)' == '' and $([MSBuild]::IsOSPlatform('OSX'))">osx</_HighlightCutOs>
+    <_HighlightCutOs Condition="'$(_HighlightCutOs)' == ''">linux</_HighlightCutOs>
+    <_HighlightCutArch>$([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString().ToLowerInvariant())</_HighlightCutArch>
+    <HighlightCutNativeRid Condition="'$(HighlightCutNativeRid)' == '' and '$(RuntimeIdentifier)' != ''">$(RuntimeIdentifier)</HighlightCutNativeRid>
+    <HighlightCutNativeRid Condition="'$(HighlightCutNativeRid)' == ''">$(_HighlightCutOs)-$(_HighlightCutArch)</HighlightCutNativeRid>
+    <HighlightCutNativeDir>$([MSBuild]::NormalizeDirectory('$(MSBuildThisFileDirectory)', '..', 'deps', '$(HighlightCutNativeRid)'))</HighlightCutNativeDir>
+  </PropertyGroup>
+
+  <ItemGroup Condition="Exists('$(HighlightCutNativeDir)')">
+    <None Include="$(HighlightCutNativeDir)**\*"
+          Exclude="$(HighlightCutNativeDir).highlightcut-deps.json"
+          Link="%(RecursiveDir)%(Filename)%(Extension)"
+          CopyToOutputDirectory="PreserveNewest"
+          CopyToPublishDirectory="PreserveNewest"
+          ExcludeFromSingleFile="true"
+          Visible="false" />
+  </ItemGroup>
+
+  <Target Name="HighlightCutCheckNativeDeps"
+          BeforeTargets="Build"
+          Condition="$(HighlightCutNativeRid.StartsWith('win-')) and !Exists('$(HighlightCutNativeDir).highlightcut-deps.json')">
+    <Warning Code="HIGHLIGHTCUT001"
+             Text="Native dependencies for $(HighlightCutNativeRid) are missing. Run: pwsh scripts/fetch-deps.ps1 -Rid $(HighlightCutNativeRid)" />
+  </Target>
+</Project>

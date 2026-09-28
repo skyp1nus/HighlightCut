@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Project model, timeline and edit commands. No UI or media dependencies,
+       so the same operations can be driven by the app or a future MCP server. -->
+  <PropertyGroup>
+    <RootNamespace>HighlightCut.Core</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="HighlightCut.Core.Tests" />
+  </ItemGroup>
+</Project>

@@ -1,4 +1,4 @@
-# OurCut Desktop Editor
+# HighlightCut Desktop Editor
 
 _Started 2026-09-24 14:24 UTC_
 
@@ -6,7 +6,7 @@ _Started 2026-09-24 14:24 UTC_
 
 ## User
 
-Design OurCut, a desktop video editor inspired by LosslessCut. It's fast and minimal, focused on cutting segments and merging them without re-encoding. A built-in AI assistant (Claude via MCP) edits the timeline alongside the user.
+Design HighlightCut, a desktop video editor inspired by LosslessCut. It's fast and minimal, focused on cutting segments and merging them without re-encoding. A built-in AI assistant (Claude via MCP) edits the timeline alongside the user.
 
 Visual style: follow the attached DESIGN.md (dark "mission control" style: matte-black surfaces, hairline borders, Inter at light weights, rationed blue accent). It describes a marketing site, so adapt it to a desktop app:
 - Ignore hero, logo strip, announcement bar, footer, display-size type and large section gaps.
@@ -79,7 +79,7 @@ _[tool: show_html]_
 
 _[tool: ready_for_verification]_
 
-I've built `OurCut.dc.html` as one working prototype of the 1440×900 Windows window. A switcher above it jumps between the five states. It's out for a background check now.
+I've built `HighlightCut.dc.html` as one working prototype of the 1440×900 Windows window. A switcher above it jumps between the five states. It's out for a background check now.
 
 - **Empty:** a drop zone where dropping a file or clicking Open file loads the video.
 - **Editing:** the five clips are live. You can scrub, play, drag in/out handles (with an optional snap to keyframes), drag rows to reorder, turn clips on or off, and delete them. The shortcuts work: Space, I/O, ←/→ (Shift steps by one second), Del and Ctrl+Z.

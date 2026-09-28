@@ -1,0 +1,249 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:HighlightCut.App.ViewModels"
+             xmlns:c="using:HighlightCut.App.Controls"
+             x:Class="HighlightCut.App.Views.TimelinePanel"
+             x:DataType="vm:EditorViewModel">
+  <!-- 212 px (232 with the transcript lane): 36 px toolbar, 158 px of tracks, room for the scrollbar when zoomed in. -->
+  <Border Name="Root" Height="{Binding TimelineHeight}" Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource DividerBrush}"
+          BorderThickness="0,1,0,0">
+    <Grid RowDefinitions="36,*">
+      <!-- Toolbar: tools | marker layers | selection | snap | zoom. -->
+      <Border BorderBrush="{StaticResource DividerSoftBrush}" BorderThickness="0,0,0,1" Padding="12,0">
+        <Grid ColumnDefinitions="Auto,*,Auto" Classes.disabled="{Binding IsEmpty}" Name="Toolbar">
+          <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+            <Button Classes="seg" Classes.on="{Binding IsSelectTool}" Height="24" Padding="8,0,6,0" FontSize="11.5"
+                    ToolTip.Tip="Select and trim clips (V)" Command="{Binding SelectToolCommand}">
+              <StackPanel Orientation="Horizontal" Spacing="6">
+                <TextBlock Text="Select" VerticalAlignment="Center" />
+                <TextBlock Classes="mono key" Text="V" VerticalAlignment="Center" />
+              </StackPanel>
+            </Button>
+            <Button Classes="seg" Classes.on="{Binding IsSplitTool}" Height="24" Padding="8,0,6,0" FontSize="11.5"
+                    ToolTip.Tip="Click a clip to split it there (S splits at the playhead)" Command="{Binding SplitToolCommand}">
+              <StackPanel Orientation="Horizontal" Spacing="6">
+                <TextBlock Text="Split" VerticalAlignment="Center" />
+                <TextBlock Classes="mono key" Text="S" VerticalAlignment="Center" />
+              </StackPanel>
+            </Button>
+            <Border Width="1" Height="16" Background="#1AFFFFFF" Margin="6,0" VerticalAlignment="Center" />
+            <Button Classes="chip" Classes.on="{Binding ShowFrames}" Height="24" Padding="8,0"
+                    ToolTip.Tip="Thumbnails on the video track" Command="{Binding ToggleFramesCommand}">
+              <StackPanel Orientation="Horizontal" Spacing="6">
+                <Border Classes="swatch" ClipToBounds="True">
+                  <Grid ColumnDefinitions="*,1,*">
+                    <Border Background="#8CFFFFFF" />
+                    <Border Grid.Column="2" Background="#8CFFFFFF" />
+                  </Grid>
+                </Border>
+                <TextBlock Text="Frames" VerticalAlignment="Center" />
+              </StackPanel>
+            </Button>
+            <Button Classes="chip" Classes.on="{Binding ShowKeyframes}" Height="24" Padding="8,0" ToolTip.Tip="Keyframe ticks"
+                    Command="{Binding ToggleKeyframesCommand}">
+              <StackPanel Orientation="Horizontal" Spacing="6">
+                <Border Classes="swatch" Background="#66FFFFFF" />
+                <TextBlock Text="Keyframes" VerticalAlignment="Center" />
+              </StackPanel>
+            </Button>
+            <Button Classes="chip" Classes.on="{Binding ShowSilences}" Height="24" Padding="8,0" IsEnabled="{Binding HasSilenceData}"
+                    ToolTip.Tip="{Binding SilenceTip}" ToolTip.ShowOnDisabled="True"
+                    Command="{Binding ToggleSilencesCommand}">
+              <StackPanel Orientation="Horizontal" Spacing="6">
+                <Border Classes="swatch" ClipToBounds="True">
+                  <c:HatchFill Period="4" LineWidth="2" Stroke="#4DFFFFFF" />
+                </Border>
+                <TextBlock Text="Silence" VerticalAlignment="Center" />
+              </StackPanel>
+            </Button>
+            <Button Classes="chip" Classes.on="{Binding ScenesOn}" Height="24" Padding="8,0" IsEnabled="{Binding CanToggleScenes}"
+                    ToolTip.Tip="{Binding ScenesTip}" ToolTip.ShowOnDisabled="True"
+                    Command="{Binding ToggleScenesCommand}">
+              <StackPanel Orientation="Horizontal" Spacing="6">
+                <Border Classes="swatch" Background="#9D9E9F" />
+                <TextBlock Text="Scenes" VerticalAlignment="Center" />
+              </StackPanel>
+            </Button>
+            <Button Classes="chip" Classes.on="{Binding ShowTranscriptLane}" Height="24" Padding="8,0"
+                    ToolTip.Tip="Transcript under the video track" Command="{Binding ToggleTranscriptLaneCommand}">
+              <StackPanel Orientation="Horizontal" Spacing="6">
+                <Border Classes="swatch" ClipToBounds="True">
+                  <StackPanel Spacing="2">
+                    <Border Height="1.5" Background="#8CFFFFFF" />
+                    <Border Height="1.5" Background="#8CFFFFFF" />
+                    <Border Height="1.5" Background="#8CFFFFFF" />
+                  </StackPanel>
+                </Border>
+                <TextBlock Text="Transcript" VerticalAlignment="Center" />
+              </StackPanel>
+            </Button>
+          </StackPanel>
+
+          <TextBlock Grid.Column="1" Classes="mono" Text="{Binding SelectionInfo}" FontSize="11" LetterSpacing="-0.2"
+                     Foreground="{StaticResource MutedBrush}" HorizontalAlignment="Center" VerticalAlignment="Center"
+                     TextTrimming="CharacterEllipsis" Margin="8,0" />
+
+          <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+            <Button Classes="chip on" Height="24" Padding="8,0" ToolTip.Tip="Snap trims to keyframes (hold Alt to drag freely)"
+                    Command="{Binding ToggleSnapCommand}">
+              <StackPanel Orientation="Horizontal" Spacing="8">
+                <CheckBox Theme="{StaticResource Switch}" Classes="small" IsChecked="{Binding SnapToKeyframes}" IsHitTestVisible="False"
+                          VerticalAlignment="Center" />
+                <TextBlock Text="Snap to keyframes" VerticalAlignment="Center" />
+              </StackPanel>
+            </Button>
+            <Border Width="1" Height="16" Background="#1AFFFFFF" Margin="6,0" VerticalAlignment="Center" />
+            <Button Classes="ghost bright" Width="22" Height="22" CornerRadius="5" FontSize="14" FontWeight="Normal"
+                    Foreground="{StaticResource Text4Brush}" ToolTip.Tip="Zoom out" Command="{Binding ZoomOutCommand}" Content="−" />
+            <Slider Theme="{StaticResource ZoomSlider}" Width="110" Minimum="0" Maximum="1" Value="{Binding ZoomLevel}"
+                    VerticalAlignment="Center" ToolTip.Tip="Zoom (Ctrl+wheel)" />
+            <Button Classes="ghost bright" Width="22" Height="22" CornerRadius="5" FontSize="14" FontWeight="Normal"
+                    Foreground="{StaticResource Text4Brush}" ToolTip.Tip="Zoom in" Command="{Binding ZoomInCommand}" Content="+" />
+            <Button Classes="soft" Height="22" Padding="8,0" CornerRadius="6" FontSize="11" Foreground="{StaticResource Text2Brush}"
+                    ToolTip.Tip="Fit the whole file" Command="{Binding ZoomFitCommand}" Content="Fit" />
+            <TextBlock Classes="mono" Text="{Binding #Timeline.ZoomText}" FontSize="10.5" Foreground="{StaticResource MutedBrush}"
+                       Width="32" TextAlignment="Right" VerticalAlignment="Center" />
+          </StackPanel>
+        </Grid>
+      </Border>
+
+      <Grid Grid.Row="1" ColumnDefinitions="112,*">
+        <!-- Track names. -->
+        <Border BorderBrush="{StaticResource DividerSoftBrush}" BorderThickness="0,0,1,0">
+          <Grid RowDefinitions="22,64,Auto,72,*">
+            <Border Grid.Row="1" Classes="track" BorderBrush="{StaticResource DividerSoftBrush}" BorderThickness="0,1,0,0">
+              <TextBlock Classes="track" Text="V1" />
+            </Border>
+            <Border Grid.Row="2" Height="20" BorderBrush="{StaticResource DividerSoftBrush}" BorderThickness="0,1,0,0"
+                    IsVisible="{Binding IsTranscriptLaneVisible}">
+              <TextBlock Classes="track" Text="TX" />
+            </Border>
+            <Border Grid.Row="3" BorderBrush="{StaticResource DividerSoftBrush}" BorderThickness="0,1,0,0">
+              <Panel>
+              <TextBlock Classes="track" Text="A1" IsVisible="{Binding !AudioLanes.Count}" />
+              <!-- One row per lane, as tall as its waveform lane (the track less 6 px above and below). -->
+              <ItemsControl ItemsSource="{Binding AudioLanes}" Margin="0,6">
+                <ItemsControl.ItemsPanel>
+                  <ItemsPanelTemplate>
+                    <UniformGrid Columns="1" />
+                  </ItemsPanelTemplate>
+                </ItemsControl.ItemsPanel>
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate x:DataType="vm:AudioLaneViewModel">
+                    <!-- Mute, volume slider, volume in dB. -->
+                    <Grid Classes="lane" Classes.muted="{Binding IsMuted}" ColumnDefinitions="26,*,40" Height="20"
+                          VerticalAlignment="Center" Background="Transparent">
+                      <Grid.ContextMenu>
+                        <ContextMenu>
+                          <MenuItem Header="Reset volume" Command="{Binding ResetVolumeCommand}" />
+                          <MenuItem Header="Even out all tracks" Command="{Binding EvenOutCommand}" />
+                        </ContextMenu>
+                      </Grid.ContextMenu>
+                      <Button Classes="track" Classes.muted="{Binding IsMuted}" HorizontalAlignment="Stretch" Height="20"
+                              ToolTip.Tip="{Binding MuteTip}" Command="{Binding ToggleMuteCommand}">
+                        <TextBlock Classes="mono" Text="{Binding Key}" FontSize="10" FontWeight="Medium" />
+                      </Button>
+                      <Slider Grid.Column="1" Classes="gain" Theme="{StaticResource VolumeSlider}" Margin="5,0,3,0" ClipToBounds="False"
+                              Minimum="-40" Maximum="12" TickFrequency="0.5" IsSnapToTickEnabled="True"
+                              Value="{Binding GainDb}" VerticalAlignment="Center" ToolTip.Tip="{Binding VolumeTip}"
+                              DoubleTapped="OnVolumeDoubleTapped" PointerWheelChanged="OnVolumeWheel" />
+                      <TextBlock Grid.Column="2" Classes="mono gain" Text="{Binding GainText}" FontSize="10" TextAlignment="Right"
+                                 VerticalAlignment="Center" Margin="0,0,8,0" Background="Transparent" ToolTip.Tip="{Binding VolumeTip}"
+                                 DoubleTapped="OnVolumeDoubleTapped" PointerWheelChanged="OnVolumeWheel" />
+                    </Grid>
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+              </Panel>
+            </Border>
+          </Grid>
+        </Border>
+
+        <Panel Grid.Column="1" Margin="0,0,12,0">
+          <c:TimelineControl Name="Timeline" Height="{Binding TimelineTracksHeight}" VerticalAlignment="Top" Editor="{Binding}">
+            <!-- A right-click on a clip selects it first (TimelineControl), so these act on that clip. -->
+            <c:TimelineControl.ContextMenu>
+              <ContextMenu>
+                <MenuItem Header="{Binding ExcludeLabel}" InputGesture="E" Command="{Binding ToggleExcludeCommand}"
+                          IsEnabled="{Binding HasSelection}" />
+                <MenuItem Header="Split at playhead" InputGesture="S" Command="{Binding SplitCommand}" />
+                <MenuItem Header="Join with next" InputGesture="J" Command="{Binding JoinWithNextCommand}"
+                          IsEnabled="{Binding CanJoinWithNext}" />
+                <Separator />
+                <MenuItem Header="Delete clip" InputGesture="Delete" Command="{Binding DeleteClipCommand}"
+                          IsEnabled="{Binding HasSelection}" />
+              </ContextMenu>
+            </c:TimelineControl.ContextMenu>
+          </c:TimelineControl>
+          <ScrollBar Name="HScroll" Orientation="Horizontal" VerticalAlignment="Bottom" Height="8" Margin="0,0,0,3"
+                     Minimum="0" Maximum="{Binding #Timeline.MaxScroll}" ViewportSize="{Binding #Timeline.Bounds.Width}"
+                     Value="{Binding #Timeline.ScrollOffset, Mode=TwoWay}"
+                     IsVisible="{Binding #Timeline.MaxScroll, Converter={x:Static c:Converters.IsPositive}}" />
+        </Panel>
+      </Grid>
+    </Grid>
+  </Border>
+
+  <UserControl.Styles>
+    <Style Selector="Grid#Toolbar.disabled">
+      <Setter Property="Opacity" Value="0.35" />
+      <Setter Property="IsHitTestVisible" Value="False" />
+    </Style>
+    <Style Selector="TextBlock.key">
+      <Setter Property="FontSize" Value="10" />
+      <Setter Property="FontWeight" Value="Medium" />
+      <Setter Property="Foreground" Value="{StaticResource MutedBrush}" />
+    </Style>
+    <Style Selector="Button.chip">
+      <Setter Property="CornerRadius" Value="6" />
+      <Setter Property="FontSize" Value="11.5" />
+      <Setter Property="FontWeight" Value="Normal" />
+      <Setter Property="Foreground" Value="{StaticResource Muted3Brush}" />
+    </Style>
+    <Style Selector="Button.chip.on">
+      <Setter Property="Foreground" Value="{StaticResource Text2Brush}" />
+    </Style>
+    <Style Selector="Button.chip:pointerover">
+      <Setter Property="Background" Value="{StaticResource ControlBrush}" />
+    </Style>
+    <Style Selector="Button.chip:disabled">
+      <Setter Property="Opacity" Value="0.5" />
+    </Style>
+    <Style Selector="Border.swatch">
+      <Setter Property="Width" Value="10" />
+      <Setter Property="Height" Value="10" />
+      <Setter Property="CornerRadius" Value="2" />
+      <Setter Property="BoxShadow" Value="inset 0 0 0 1 #40FFFFFF" />
+      <Setter Property="Opacity" Value="0.3" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+    <Style Selector="Button.chip.on Border.swatch">
+      <Setter Property="Opacity" Value="1" />
+    </Style>
+    <Style Selector="TextBlock.track">
+      <Setter Property="FontFamily" Value="{StaticResource MonoFont}" />
+      <Setter Property="FontSize" Value="10" />
+      <Setter Property="FontWeight" Value="Medium" />
+      <Setter Property="Foreground" Value="{StaticResource MutedBrush}" />
+      <Setter Property="HorizontalAlignment" Value="Center" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+    <Style Selector="Button.track">
+      <Setter Property="Foreground" Value="{StaticResource MutedBrush}" />
+      <Setter Property="CornerRadius" Value="0" />
+    </Style>
+    <Style Selector="Button.track:pointerover">
+      <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
+    </Style>
+    <Style Selector="Button.track.muted">
+      <Setter Property="Foreground" Value="{StaticResource Muted3Brush}" />
+    </Style>
+    <Style Selector="TextBlock.gain">
+      <Setter Property="Foreground" Value="{StaticResource MutedBrush}" />
+    </Style>
+    <!-- A muted lane's volume is kept but not heard: dimmed like its waveform. -->
+    <Style Selector="Grid.lane.muted Slider.gain, Grid.lane.muted TextBlock.gain">
+      <Setter Property="Opacity" Value="0.3" />
+    </Style>
+  </UserControl.Styles>
+</UserControl>

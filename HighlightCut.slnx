@@ -1,0 +1,16 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/HighlightCut.App/HighlightCut.App.csproj" />
+    <Project Path="src/HighlightCut.Core/HighlightCut.Core.csproj" />
+    <Project Path="src/HighlightCut.Mcp/HighlightCut.Mcp.csproj" />
+    <Project Path="src/HighlightCut.Media/HighlightCut.Media.csproj" />
+    <Project Path="src/HighlightCut.Transcription/HighlightCut.Transcription.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/HighlightCut.App.Tests/HighlightCut.App.Tests.csproj" />
+    <Project Path="tests/HighlightCut.Core.Tests/HighlightCut.Core.Tests.csproj" />
+    <Project Path="tests/HighlightCut.Mcp.Tests/HighlightCut.Mcp.Tests.csproj" />
+    <Project Path="tests/HighlightCut.Media.Tests/HighlightCut.Media.Tests.csproj" />
+    <Project Path="tests/HighlightCut.Transcription.Tests/HighlightCut.Transcription.Tests.csproj" />
+  </Folder>
+</Solution>

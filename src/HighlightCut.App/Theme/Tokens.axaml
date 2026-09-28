@@ -1,0 +1,58 @@
+<ResourceDictionary xmlns="https://github.com/avaloniaui"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+  <!--
+    Colours and fonts from design/project/HighlightCut.dc.html (the "mission control" style of design/project/uploads/DESIGN.md):
+    matte-black surfaces, hairline borders, Inter at light weights, one rationed blue accent.
+    Hairlines are 0.5 px in the prototype; browsers draw them as one device pixel, so they are 1 px here.
+  -->
+
+  <FontFamily x:Key="SansFont">fonts:HighlightCut#Inter</FontFamily>
+  <FontFamily x:Key="MonoFont">fonts:HighlightCut#JetBrains Mono</FontFamily>
+
+  <!-- Signal Blue: playhead, selected segment, active tool/tab, focus rings, links. Nothing else. -->
+  <Color x:Key="AccentColor">#3B82F6</Color>
+  <SolidColorBrush x:Key="AccentBrush" Color="#3B82F6" />
+  <SolidColorBrush x:Key="AccentHoverBrush" Color="#60A5FA" />
+  <SolidColorBrush x:Key="LinkBrush" Color="#60A5FA" />
+  <SolidColorBrush x:Key="LinkHoverBrush" Color="#93C5FD" />
+  <SolidColorBrush x:Key="FocusRingBrush" Color="#8C3B82F6" />
+  <!-- Green and red only for status and destructive actions. -->
+  <SolidColorBrush x:Key="StatusOnBrush" Color="#4ADE80" />
+  <SolidColorBrush x:Key="StatusOffBrush" Color="#71717A" />
+  <SolidColorBrush x:Key="DangerBrush" Color="#F87171" />
+  <SolidColorBrush x:Key="DangerHoverBgBrush" Color="#1AF87171" />
+  <!-- Export is the only bone button. -->
+  <SolidColorBrush x:Key="BoneBrush" Color="#F2F2F2" />
+  <SolidColorBrush x:Key="InkBrush" Color="#333333" />
+
+  <!-- Surfaces. -->
+  <SolidColorBrush x:Key="WindowBrush" Color="#0B0C0E" />
+  <SolidColorBrush x:Key="ChromeBrush" Color="#0B0C0E" />
+  <SolidColorBrush x:Key="VideoAreaBrush" Color="#0B0C0E" />
+  <SolidColorBrush x:Key="PanelBrush" Color="#131416" />
+  <SolidColorBrush x:Key="PanelDeepBrush" Color="#0F1012" />
+  <SolidColorBrush x:Key="DialogBrush" Color="#131416" />
+  <SolidColorBrush x:Key="FieldBrush" Color="#1F1F21" />
+  <SolidColorBrush x:Key="ScrimBrush" Color="#9E050607" />
+  <SolidColorBrush x:Key="ControlBrush" Color="#0DFFFFFF" />
+  <SolidColorBrush x:Key="ControlHoverBrush" Color="#17FFFFFF" />
+  <SolidColorBrush x:Key="SubtleBrush" Color="#06FFFFFF" />
+  <SolidColorBrush x:Key="SubtleHoverBrush" Color="#0FFFFFFF" />
+  <SolidColorBrush x:Key="SelectedBrush" Color="#14FFFFFF" />
+
+  <!-- Lines. -->
+  <SolidColorBrush x:Key="DividerBrush" Color="#12FFFFFF" />
+  <SolidColorBrush x:Key="DividerSoftBrush" Color="#0DFFFFFF" />
+  <SolidColorBrush x:Key="OutlineBrush" Color="#1AFFFFFF" />
+  <SolidColorBrush x:Key="OutlineStrongBrush" Color="#1FFFFFFF" />
+  <SolidColorBrush x:Key="KbdBorderBrush" Color="#24FFFFFF" />
+
+  <!-- Text: snow, chalk, ash, fog, steel. -->
+  <SolidColorBrush x:Key="TextBrush" Color="#FFFFFF" />
+  <SolidColorBrush x:Key="Text2Brush" Color="#CECECF" />
+  <SolidColorBrush x:Key="Text3Brush" Color="#CECECF" />
+  <SolidColorBrush x:Key="Text4Brush" Color="#9D9E9F" />
+  <SolidColorBrush x:Key="MutedBrush" Color="#858687" />
+  <SolidColorBrush x:Key="Muted2Brush" Color="#858687" />
+  <SolidColorBrush x:Key="Muted3Brush" Color="#71717A" />
+</ResourceDictionary>

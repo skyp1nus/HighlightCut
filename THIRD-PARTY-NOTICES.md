@@ -1,6 +1,6 @@
 # Third-party notices
 
-OurCut is licensed under GPL-3.0-or-later. It depends on the components below.
+HighlightCut is licensed under GPL-3.0-or-later. It depends on the components below.
 
 ## Native binaries (downloaded by `scripts/fetch-deps.ps1`, not stored in this repository)
 
@@ -12,10 +12,10 @@ OurCut is licensed under GPL-3.0-or-later. It depends on the components below.
 | 7-Zip (`7zr.exe`, build tool only, never shipped) | 26.03 | Public domain | [ip7z/7zip](https://github.com/ip7z/7zip) |
 
 This software uses code of FFmpeg (https://ffmpeg.org) licensed under the GPLv3, and its source can be
-downloaded from the links above. FFmpeg and mpv are trademarks of their respective owners; OurCut is not
+downloaded from the links above. FFmpeg and mpv are trademarks of their respective owners; HighlightCut is not
 affiliated with or endorsed by either project.
 
-Anyone distributing OurCut builds that include these binaries must also offer their corresponding source
+Anyone distributing HighlightCut builds that include these binaries must also offer their corresponding source
 code (GPLv3 section 6).
 
 ## NuGet packages
@@ -32,5 +32,5 @@ code (GPLv3 section 6).
 
 | Font | License |
 | --- | --- |
-| Inter (The Inter Project Authors) | SIL Open Font License 1.1, see `src/OurCut.App/Assets/Fonts/OFL-Inter.txt` |
-| JetBrains Mono (The JetBrains Mono Project Authors) | SIL Open Font License 1.1, see `src/OurCut.App/Assets/Fonts/OFL-JetBrainsMono.txt` |
+| Inter (The Inter Project Authors) | SIL Open Font License 1.1, see `src/HighlightCut.App/Assets/Fonts/OFL-Inter.txt` |
+| JetBrains Mono (The JetBrains Mono Project Authors) | SIL Open Font License 1.1, see `src/HighlightCut.App/Assets/Fonts/OFL-JetBrainsMono.txt` |

@@ -1,0 +1,27 @@
+<ResourceDictionary xmlns="https://github.com/avaloniaui"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+  <!-- Path data copied from the design's inline SVGs. 24×24 view box unless noted. -->
+  <StreamGeometry x:Key="IconCheck">M5 12.5L10 17L19 7</StreamGeometry>
+  <!-- design/project/HighlightCut.dc.html icons. 16×16 view box. -->
+  <StreamGeometry x:Key="IconOpen16">M2 4.5h4l1.5 1.5H14v6.5H2z</StreamGeometry>
+  <StreamGeometry x:Key="IconGearHub16">M5.6 8a2.4 2.4 0 1 0 4.8 0a2.4 2.4 0 1 0 -4.8 0z</StreamGeometry>
+  <StreamGeometry x:Key="IconGearTeeth16">M8.00 2.40A5.6 5.6 0 0 1 10.14 2.83M11.60 3.71A5.6 5.6 0 0 1 12.97 5.41M13.51 7.03A5.6 5.6 0 0 1 13.47 9.21M12.85 10.80A5.6 5.6 0 0 1 11.41 12.44M9.92 13.26A5.6 5.6 0 0 1 7.75 13.59M6.08 13.26A5.6 5.6 0 0 1 4.22 12.13M3.15 10.80A5.6 5.6 0 0 1 2.45 8.73M2.49 7.03A5.6 5.6 0 0 1 3.28 4.99M4.40 3.71A5.6 5.6 0 0 1 6.32 2.66</StreamGeometry>
+  <StreamGeometry x:Key="IconDrop16">M8 2.5v8M4.5 7L8 10.5 11.5 7M3 13h10</StreamGeometry>
+  <StreamGeometry x:Key="IconSpeaker16">M2 6h2.5L8 3v10L4.5 10H2z</StreamGeometry>
+  <StreamGeometry x:Key="IconSpeakerWaves16">M10.5 5.5a3.5 3.5 0 0 1 0 5M12 4a5.5 5.5 0 0 1 0 8</StreamGeometry>
+  <!-- 14×14 view box (transport, filled). -->
+  <StreamGeometry x:Key="IconStepBack14">M2.35 3h1.3v8h-1.3zM11 3v8L5 7z</StreamGeometry>
+  <StreamGeometry x:Key="IconStepForward14">M10.35 3h1.3v8h-1.3zM3 3v8L9 7z</StreamGeometry>
+  <StreamGeometry x:Key="IconPlay14">M4 2.5v9l7.5-4.5z</StreamGeometry>
+  <StreamGeometry x:Key="IconPause14">M3 2.5h2.6v9H3zM8.4 2.5h2.6v9H8.4z</StreamGeometry>
+  <!-- 12×12 and 10×10 view boxes. -->
+  <StreamGeometry x:Key="IconChevron12">M3 4.5l3 3 3-3</StreamGeometry>
+  <StreamGeometry x:Key="IconSearch12">M1.5 5.2a3.7 3.7 0 1 0 7.4 0a3.7 3.7 0 1 0 -7.4 0zM8 8l2.8 2.8</StreamGeometry>
+  <StreamGeometry x:Key="IconChevronUp10">M2 6.5L5 3.5l3 3</StreamGeometry>
+  <StreamGeometry x:Key="IconChevronDown10">M2 3.5l3 3 3-3</StreamGeometry>
+  <StreamGeometry x:Key="IconClose10">M1 1l8 8M9 1L1 9</StreamGeometry>
+  <StreamGeometry x:Key="IconRemove10">M1.5 1.5l7 7M8.5 1.5l-7 7</StreamGeometry>
+  <StreamGeometry x:Key="IconMinimize10">M0 5h10</StreamGeometry>
+  <StreamGeometry x:Key="IconMaximize10">M0.5 0.5h9v9h-9z</StreamGeometry>
+  <StreamGeometry x:Key="IconCloseWindow10">M0 0l10 10M10 0L0 10</StreamGeometry>
+</ResourceDictionary>

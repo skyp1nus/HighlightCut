@@ -1,0 +1,38 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <OutputType>WinExe</OutputType>
+    <RootNamespace>HighlightCut.App</RootNamespace>
+    <AssemblyName>HighlightCut</AssemblyName>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>Assets\highlightcut.ico</ApplicationIcon>
+    <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
+  </PropertyGroup>
+  <ItemGroup>
+    <AvaloniaResource Include="Assets\**" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\HighlightCut.Core\HighlightCut.Core.csproj" />
+    <ProjectReference Include="..\HighlightCut.Media\HighlightCut.Media.csproj" />
+    <ProjectReference Include="..\HighlightCut.Mcp\HighlightCut.Mcp.csproj" />
+    <ProjectReference Include="..\HighlightCut.Transcription\HighlightCut.Transcription.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="Avalonia" />
+    <PackageReference Include="Avalonia.Desktop" />
+    <PackageReference Include="Avalonia.Themes.Fluent" />
+    <PackageReference Include="CommunityToolkit.Mvvm" />
+  </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="HighlightCut.App.Tests" />
+  </ItemGroup>
+  <Import Project="..\..\build\HighlightCut.NativeDeps.targets" />
+
+  <!-- Release builds: SkiaSharp and HarfBuzz ship ~100 MB of native debug symbols that users do not need. -->
+  <Target Name="HighlightCutDropNativeSymbols" AfterTargets="ComputeResolvedFilesToPublishList">
+    <ItemGroup>
+      <ResolvedFileToPublish Remove="@(ResolvedFileToPublish)"
+                             Condition="'%(Extension)' == '.pdb' and ('%(Filename)' == 'libSkiaSharp' or '%(Filename)' == 'libHarfBuzzSharp')" />
+    </ItemGroup>
+  </Target>
+</Project>

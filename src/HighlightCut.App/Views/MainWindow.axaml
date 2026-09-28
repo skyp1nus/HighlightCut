@@ -1,0 +1,43 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:HighlightCut.App.ViewModels"
+        xmlns:v="using:HighlightCut.App.Views"
+        x:Class="HighlightCut.App.Views.MainWindow"
+        x:DataType="vm:EditorViewModel"
+        Title="{Binding WindowTitle, FallbackValue=HighlightCut}"
+        Icon="/Assets/highlightcut.ico"
+        Width="1440" Height="900" MinWidth="1100" MinHeight="700"
+        WindowStartupLocation="CenterScreen"
+        Background="{StaticResource WindowBrush}"
+        ExtendClientAreaToDecorationsHint="True"
+        ExtendClientAreaTitleBarHeightHint="48"
+        WindowDecorations="BorderOnly"
+        FontFamily="{StaticResource SansFont}"
+        FontSize="12"
+        DragDrop.AllowDrop="True">
+  <!-- design/project/HighlightCut.dc.html: title bar 48, preview + 380 px sidebar, timeline 212, status bar 24. -->
+  <Panel>
+    <Grid RowDefinitions="Auto,*,Auto,Auto">
+      <v:TitleBar />
+
+      <Grid Grid.Row="1" ColumnDefinitions="*,380">
+        <v:PlayerPanel Name="Player" />
+        <Border Grid.Column="1" Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource DividerBrush}" BorderThickness="1,0,0,0">
+          <Grid RowDefinitions="*,Auto">
+            <v:ClipsPanel />
+            <v:ClaudePanel Grid.Row="1" DataContext="{Binding Claude}" />
+          </Grid>
+        </Border>
+      </Grid>
+
+      <v:TimelinePanel Grid.Row="2" />
+      <v:StatusBar Grid.Row="3" />
+
+      <!-- Over everything but the title bar, so the window still moves and closes while a file is prepared. -->
+      <v:ProcessingOverlay Grid.Row="1" Grid.RowSpan="3" DataContext="{Binding Processing}" />
+    </Grid>
+
+    <v:ExportDialog DataContext="{Binding Export}" IsVisible="{Binding IsDialogOpen}" />
+    <v:SettingsDialog DataContext="{Binding Settings}" IsVisible="{Binding IsOpen}" />
+  </Panel>
+</Window>
