@@ -131,7 +131,8 @@ public static partial class DemoScenario
                 }
                 else if (removed is not null)
                 {
-                    session.Execute(new AddClipCommand(removed.Start, removed.End, removed.Label, 0, removed.Id, removed.IsIncluded),
+                    session.Execute(new AddClipCommand(removed.Start, removed.End, removed.Label, 0, removed.Id, removed.IsIncluded,
+                        removed.Color),
                         EditOrigin.Assistant);
                 }
             }), at: now.AddMinutes(-21)));

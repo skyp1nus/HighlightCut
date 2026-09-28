@@ -215,7 +215,7 @@ public class McpToolListTests
         "add_segment", "cancel_export", "cut_filler_words", "cut_ranges", "cut_silences", "edit_timeline", "export",
         "find_filler_words", "find_keyframes", "find_scene_changes", "find_silences", "get_export_status", "get_history", "get_project",
         "get_transcript", "join_segments", "list_videos", "move_segment", "open_file", "redo", "remove_segment", "revert_action", "save_project",
-        "search_transcript", "seek", "set_included", "set_label", "set_playing", "split_segment", "trim_segment", "undo",
+        "search_transcript", "seek", "set_color", "set_included", "set_label", "set_playing", "split_segment", "trim_segment", "undo",
     ];
 
     [Fact]
@@ -324,6 +324,38 @@ public class McpEditingTests
         Assert.Equal(("Demo 1", 99.0), (p.Get(2).Label, p.Get(2).Start));
         Assert.Equal("Demo 2", p.Get(4).Label);
         Assert.Equal(131, result.GetProperty("outputDuration").GetDouble());
+    }
+
+    [Fact]
+    public async Task Clips_have_unique_names_and_colours_claude_can_set()
+    {
+        var editor = new FakeEditor();
+        await using var c = await Connection.OpenAsync(editor);
+
+        var project = (await c.Client.Call("get_project")).Json();
+        var colors = project.GetProperty("clips").EnumerateArray().Select(x => x.GetProperty("color").GetString()).ToList();
+        Assert.All(colors, color => Assert.True(ClipPalette.TryParse(color, out _), color));
+
+        var taken = await c.Client.Call("set_label", new { clip = 2, label = "intro" });
+        Assert.True(taken.IsError);
+        Assert.Contains("already called “Intro”", taken.Text(), StringComparison.Ordinal);
+
+        var added = (await c.Client.Call("add_segment", new { start = 220, end = 250, label = "Intro", color = "Pink" })).Json();
+        var clip = added.GetProperty("clips").EnumerateArray().Single(x => x.GetProperty("id").GetInt32() == 4);
+        Assert.Equal(("Intro · 2", "pink"), (clip.GetProperty("label").GetString(), clip.GetProperty("color").GetString()));
+
+        var recoloured = (await c.Client.Call("set_color", new { clip = 1, color = "amber" })).Json();
+        Assert.Equal("Coloured clip 1 amber", recoloured.GetProperty("result").GetString());
+        Assert.Equal(ClipColor.Amber, editor.Session.Project.Get(1).Color);
+        await c.Client.Call("edit_timeline", new
+        {
+            description = "Grouped the demo", operations = new object[] { new { action = "color", clip = 2, color = "violet" } },
+        });
+        Assert.Equal(ClipColor.Violet, editor.Session.Project.Get(2).Color);
+
+        var unknown = await c.Client.Call("set_color", new { clip = 1, color = "blue" });
+        Assert.True(unknown.IsError);
+        Assert.Contains("teal, amber", unknown.Text(), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -694,7 +726,10 @@ public class McpAnalysisTests
         Assert.Equal("Removed 1 silence: 3.7 s shorter.", cut.GetProperty("result").GetString());
         var clips = cut.GetProperty("clips").EnumerateArray()
             .Select(x => (x.GetProperty("label").GetString(), x.GetProperty("start").GetDouble(), x.GetProperty("end").GetDouble())).ToList();
-        Assert.Equal([("Intro", 10, 40), ("Demo", 100, 120.15), ("Demo (2)", 123.85, 200), ("Q&A", 300, 360)], clips);
+        Assert.Equal([("Intro", 10, 40), ("Demo", 100, 120.15), ("Clip 4", 123.85, 200), ("Q&A", 300, 360)], clips);
+        // The new part gets a colour of its own, so the cut shows on the timeline.
+        var colors = cut.GetProperty("clips").EnumerateArray().Select(x => x.GetProperty("color").GetString()).ToList();
+        Assert.NotEqual(colors[1], colors[2]);
         var entry = Assert.Single(editor.Session.History.Entries);
         Assert.Equal((EditOrigin.Assistant, "Removed 1 silence", "cut_silences"), (entry.Origin, entry.Description, entry.Command.Name));
 
@@ -714,7 +749,7 @@ public class McpAnalysisTests
 
         Assert.Equal([(0.0, 50.0), (52.5, 120.0), (124.0, 330.0), (340.0, 600.0)], cut.GetProperty("clips").EnumerateArray()
             .Select(x => (x.GetProperty("start").GetDouble(), x.GetProperty("end").GetDouble())));
-        Assert.Equal("keynote (4)", cut.GetProperty("clips")[3].GetProperty("label").GetString());
+        Assert.Equal("Clip 4", cut.GetProperty("clips")[3].GetProperty("label").GetString());
         // Measured against the whole video, which was kept first.
         Assert.Equal("Removed 3 silences: 16.5 s shorter.", cut.GetProperty("result").GetString());
         Assert.Single(editor.Session.History.Entries);

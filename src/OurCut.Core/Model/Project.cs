@@ -152,7 +152,20 @@ public sealed record Project(string Name, SourceMedia? Source, ImmutableList<Cli
     /// <summary>1-based position of a clip in the output order, as shown in the UI.</summary>
     public int NumberOf(int id) => IndexOf(id) + 1;
 
-    public int NextClipId => Clips.IsEmpty ? 1 : Clips.Max(c => c.Id) + 1;
+    /// <summary>
+    /// The highest clip id handed out in this project, including clips deleted since. It only goes up, so a deleted
+    /// clip's id (and its "Clip N" name) is never given to a new clip. Saved with the project.
+    /// </summary>
+    public int LastClipId { get; init; }
+
+    public int NextClipId => Math.Max(LastClipId, Clips.IsEmpty ? 0 : Clips.Max(c => c.Id)) + 1;
+
+    /// <summary>
+    /// The project with <paramref name="clips"/>, and <see cref="LastClipId"/> raised to cover the ids of the clips it
+    /// had and has, so removing the clip with the highest id does not free that id.
+    /// </summary>
+    public Project WithClips(ImmutableList<Clip> clips) =>
+        this with { Clips = clips, LastClipId = Math.Max(NextClipId - 1, clips.IsEmpty ? 0 : clips.Max(c => c.Id)) };
 
     /// <summary>First clip in output order that contains <paramref name="time"/>.</summary>
     public Clip? ClipAt(double time) => Clips.FirstOrDefault(c => c.Contains(time));

@@ -61,11 +61,11 @@ public sealed partial class DesignSample : IMediaPreview
     /// <summary>The design's five clips (Q&amp;A highlights excluded), in output order.</summary>
     public static Project Project { get; } = new("interview_final_v3", Source,
     [
-        new Clip(1, "Cold open", 12, 45.2),
-        new Clip(2, "Setup walkthrough", 118.4, 190),
-        new Clip(3, "Export demo", 262.08, 365.52),
-        new Clip(4, "Q&A highlights", 520, 612.36, IsIncluded: false),
-        new Clip(5, "Outro", 750, 828.8),
+        new Clip(1, "Cold open", 12, 45.2, Color: ClipColor.Teal),
+        new Clip(2, "Setup walkthrough", 118.4, 190, Color: ClipColor.Amber),
+        new Clip(3, "Export demo", 262.08, 365.52, Color: ClipColor.Violet),
+        new Clip(4, "Q&A highlights", 520, 612.36, IsIncluded: false, Color: ClipColor.Rose),
+        new Clip(5, "Outro", 750, 828.8, Color: ClipColor.Lime),
     ]);
 
     public double Duration => SampleDuration;

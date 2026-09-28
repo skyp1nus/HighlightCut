@@ -59,7 +59,9 @@ public sealed record RevertEditCommand(Project Before, Project After, string Des
         foreach (var clip in removed.OrderBy(c => Before.IndexOf(c.Id)))
             clips = clips.Insert(Math.Min(Before.IndexOf(clip.Id), clips.Count), clip);
 
-        return clips.SequenceEqual(project.Clips) ? project : project with { Clips = clips };
+        if (clips.GroupBy(c => c.Label.Trim(), StringComparer.OrdinalIgnoreCase).FirstOrDefault(g => g.Count() > 1) is { } twice)
+            throw new EditException($"Another clip is called “{twice.Key}” now, so “{Description}” cannot be reverted. Rename it first.");
+        return clips.SequenceEqual(project.Clips) ? project : project.WithClips(clips);
     }
 
     /// <summary>Puts the clips listed in <paramref name="order"/> back in that order, in the slots they occupy now.</summary>
