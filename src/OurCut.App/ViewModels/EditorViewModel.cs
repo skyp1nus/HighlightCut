@@ -1200,6 +1200,9 @@ public sealed partial class EditorViewModel : ViewModelBase
 
     public void SetIncluded(ClipViewModel clip, bool included) => TryEdit(() => Session.SetIncluded(clip.Id, included));
 
+    /// <summary>A colour picked from the clip's swatch or its context menu; undoable like any edit.</summary>
+    public void SetColor(ClipViewModel clip, ClipColor color) => TryEdit(() => Session.SetColor(clip.Id, color));
+
     /// <summary>"+ Keep" on an excluded gap: add it back as a new clip.</summary>
     public void KeepRange(double from, double to) => TryEdit(() => Select(Find(Session.KeepRange(from, to).Id)));
 
@@ -1318,7 +1321,7 @@ public sealed partial class EditorViewModel : ViewModelBase
             int at = IndexOfClip(clip.Id);
             if (at < 0)
             {
-                Clips.Insert(i, new ClipViewModel(clip, SetIncluded));
+                Clips.Insert(i, new ClipViewModel(clip, SetIncluded, SetColor));
                 continue;
             }
             Clips[at].Update(clip);
@@ -1444,7 +1447,8 @@ public sealed partial class EditorViewModel : ViewModelBase
     private void OnClipPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
         if (e.PropertyName is nameof(ClipViewModel.IsDragSource) or nameof(ClipViewModel.IsDropTarget)
-            or nameof(ClipViewModel.IncludeToggle))
+            or nameof(ClipViewModel.IncludeToggle) or nameof(ClipViewModel.ColorBrush) or nameof(ClipViewModel.ColorName)
+            or nameof(ClipViewModel.ColorChoices))
             return;
         RaiseTimelineChanged();
     }

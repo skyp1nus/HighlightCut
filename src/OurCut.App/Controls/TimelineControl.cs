@@ -3,18 +3,20 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Media;
+using Avalonia.Media.Immutable;
 using Avalonia.Rendering;
 using Avalonia.Threading;
 using OurCut.App.Services;
 using OurCut.App.ViewModels;
+using OurCut.Core.Model;
 using OurCut.Media.Previews;
 
 namespace OurCut.App.Controls;
 
 /// <summary>
 /// The timeline of the whole source file: ruler with scene markers, thumbnail strip with keyframe
-/// ticks, the transcript lane (when shown), audio waveform with silence bands, clips as blue-tinted
-/// segments with in/out handles, a pulsing ring on clips Claude just changed, and the playhead.
+/// ticks, the transcript lane (when shown), audio waveform with silence bands, clips as segments tinted
+/// with their colour, with in/out handles, a pulsing ring on clips Claude just changed, and the playhead.
 /// Layout follows design/project/OurCut.dc.html: ruler 22 px, video track 64 px, transcript lane 20 px,
 /// audio track 72 px.
 /// </summary>
@@ -83,12 +85,18 @@ public sealed class TimelineControl : Control, ICustomHitTest
     private static readonly IBrush EmptyText = new SolidColorBrush(Color.Parse("#858687"));
     private static readonly IBrush ChipBg = new SolidColorBrush(Color.FromArgb(199, 11, 12, 14));
     private static readonly IBrush ChipNumber = new SolidColorBrush(Color.Parse("#858687"));
-    private static readonly IBrush SegmentFill = new SolidColorBrush(Color.FromArgb(28, 59, 130, 246));
-    private static readonly IBrush SegmentFillSelected = new SolidColorBrush(Color.FromArgb(51, 59, 130, 246));
+    // Segments are tinted with the clip's colour and carry a stripe of it along the top. Selected: a stronger tint and
+    // the accent border. Excluded: no tint, a dashed grey border and a faded stripe.
+    private const double SegmentTint = 0.11;
+    private const double SegmentTintSelected = 0.2;
+    private const double SegmentEdge = 0.4;
+    private const double StripeHeight = 3;
+    private const double StripeExcluded = 0.35;
     private static readonly IBrush SegmentFillExcluded = White(0.02);
-    private static readonly IPen SegmentBorder = new Pen(new SolidColorBrush(Color.FromArgb(77, 59, 130, 246)), 1);
-    private static readonly IPen SegmentBorderSelected = new Pen(AccentBrush, 1);
+    private static readonly IPen SegmentBorderSelected = new Pen(AccentBrush, 1.5);
     private static readonly IPen SegmentBorderExcluded = new Pen(White(0.25), 1, new DashStyle([3, 3], 0));
+    private static readonly Dictionary<ClipColor, IPen> SegmentBorders = ClipPalette.Colors.ToDictionary(c => c,
+        c => (IPen)new ImmutablePen(ClipBrushes.Tint(c, SegmentEdge), 1));
     private static readonly IBrush Handle = White(0.4);
     private static readonly IBrush HandleSelected = new SolidColorBrush(Color.Parse("#F2F2F2"));
     private static readonly IBrush LaneBg = new SolidColorBrush(Color.Parse("#0F1012"));
@@ -562,9 +570,16 @@ public sealed class TimelineControl : Control, ICustomHitTest
         if (rect.X > visible.Right + 10 || rect.Right < visible.Left - 10)
             return;
         bool sel = clip.IsSelected;
-        var fill = !clip.IsIncluded ? SegmentFillExcluded : sel ? SegmentFillSelected : SegmentFill;
-        var pen = sel ? SegmentBorderSelected : clip.IsIncluded ? SegmentBorder : SegmentBorderExcluded;
-        ctx.DrawRectangle(fill, pen, new RoundedRect(rect.Deflate(0.5), 3.5));
+        var fill = !clip.IsIncluded ? SegmentFillExcluded : ClipBrushes.Tint(clip.Color, sel ? SegmentTintSelected : SegmentTint);
+        var pen = sel ? SegmentBorderSelected : clip.IsIncluded ? SegmentBorders[clip.Color] : SegmentBorderExcluded;
+        var shape = new RoundedRect(rect.Deflate(0.5), 3.5);
+        ctx.DrawRectangle(fill, null, shape);
+        using (ctx.PushClip(shape))
+        {
+            ctx.FillRectangle(ClipBrushes.Tint(clip.Color, clip.IsIncluded ? 1 : StripeExcluded),
+                new Rect(rect.X, rect.Y, rect.Width, StripeHeight));
+        }
+        ctx.DrawRectangle(null, pen, shape);
         _hits.Add(new HitRegion(HitKind.Segment, clip) { Rect = rect });
 
         // Label chip: number and name.
@@ -576,7 +591,7 @@ public sealed class TimelineControl : Control, ICustomHitTest
             double labelMax = Math.Max(1, maxWidth - 10 - num.Width - 5);
             var label = Text(clip.Label, SansFace(FontWeight.Normal), 10, labelBrush, labelMax);
             double chipWidth = Math.Min(maxWidth, 5 + num.Width + 5 + label.WidthIncludingTrailingWhitespace + 5);
-            var chip = new Rect(rect.X + 4, rect.Y + 4, chipWidth, 16);
+            var chip = new Rect(rect.X + 4, rect.Y + StripeHeight + 3, chipWidth, 16);
             using (ctx.PushClip(new RoundedRect(chip, 3)))
             {
                 ctx.FillRectangle(ChipBg, chip);

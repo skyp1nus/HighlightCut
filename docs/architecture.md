@@ -16,6 +16,7 @@ OurCut.Mcp    MCP tools, pipe server, bridge ───┘
   seconds on the source timeline. Excluded clips (`IsIncluded = false`) stay in the project but are not exported.
   `Project.AudioMix` holds a `TrackMix` (volume in dB, muted) for each audio track that is not at the default
   (0 dB, unmuted), keyed by stream index. The volume runs from −40 dB, which means silent (−∞), to +12 dB.
+- **Clip names and colours**: every clip has a name of its own and a colour (see below).
 - **Commands** (`OurCut.Core.Editing`): every change is an `IEditCommand` that turns one `Project` into the
   next, or throws `EditException` with a readable reason. Commands never clamp or guess; callers do that.
 - **Session**: `EditorSession` holds the current project and a linear `History`. `Execute` applies a command
@@ -37,7 +38,8 @@ The session is not thread-safe. The MCP server runs every tool call on the UI th
 | `SplitClipCommand` | `split_segment` | Splits a clip in two at a source time |
 | `SetClipIncludedCommand` | `set_included` | Excludes a clip from the export or keeps it again |
 | `MoveClipCommand` | `move_segment` | Moves a clip to another output position |
-| `RenameClipCommand` | `set_label` | Renames a clip |
+| `RenameClipCommand` | `set_label` | Renames a clip (refused if another clip has that name) |
+| `SetClipColorCommand` | `set_color` | Sets a clip's colour |
 | `BatchCommand` | any | Several commands as one undo step |
 | `RevertEditCommand` | `revert_action` | Reverts one earlier edit and keeps the edits made after it |
 | `CutRangesCommand` | `cut_silences`, `cut_ranges`, `cut_filler_words` | Cuts source ranges out of the clips they touch, splitting them |
@@ -246,7 +248,7 @@ Claude ──stdio──> OurCut.exe mcp (McpBridge) ──named pipe──> Our
 | `search_transcript`, `find_filler_words` | Where a word or phrase (case and punctuation ignored), or the user's filler words (Settings → Transcription), are said |
 | `cut_ranges`, `cut_filler_words` | Cut any source ranges (e.g. from the transcript), or the filler words, out of the clips as one undo step |
 | `list_videos` | Video files in a folder, newest first |
-| `add_segment`, `remove_segment`, `trim_segment`, `split_segment`, `set_included`, `move_segment`, `set_label` | One edit each (the commands above) |
+| `add_segment`, `remove_segment`, `trim_segment`, `split_segment`, `set_included`, `move_segment`, `set_label`, `set_color` | One edit each (the commands above); `add_segment` takes an optional label and colour |
 | `edit_timeline` | Several edits as one undo step, all or nothing |
 | `revert_action`, `undo`, `redo` | Take edits back |
 | `seek`, `set_playing` | Show a frame or play |
@@ -390,6 +392,44 @@ and Whisper large-v3-turbo, small and base.en (99 languages; base.en English onl
   models go to `%LOCALAPPDATA%\OurCut\models` unless another folder is chosen. Cancelling a download removes it;
   a failed one is kept and continues on the next try.
 
+## Clip names and colours
+
+Names (`ClipNames`) are unique in a project, compared ignoring case and surrounding spaces:
+
+- A new clip without a name is "Clip N", where N is its id. This covers "+ Keep", I with no clip selected, the second
+  half of a split and the extra parts of a cut (silences, filler words, "Cut out"): they all get the next number, so
+  splitting "Clip 3" twice gives "Clip 3", "Clip 7" and "Clip 8", never "Clip 3 (b) (b)". The first part of a split
+  or cut keeps the clip's id, name and colour.
+- Ids come from `Project.LastClipId`, the highest id ever handed out in the project. It is saved with the project
+  and only goes up, so after "Clip 7" is deleted the next new clip is "Clip 8". Undo takes it back along with the
+  clip that was undone, since that clip then never existed.
+- A new clip given a name that is taken ("Keep as clip" names it after its words, Claude may pass a label, a clip
+  may have been renamed to "Clip 9" before clip 9 was made) gets " · 2", " · 3"… added.
+- Renaming a clip to a name another clip has is refused with "Clip 2 is already called “Intro”; clip names must be
+  unique." Renaming is a deliberate choice, so silently changing the name would be a surprise. Reverting an edit
+  that would bring back a name another clip has taken since is refused too.
+- Files saved before this keep their names. If two clips share one, the first in output order keeps it and the
+  others get " · 2", " · 3"….
+
+Colours (`ClipColor`, `ClipPalette`) come from a palette of ten: teal, amber, violet, rose, lime, cyan, orange,
+indigo, emerald and pink (the 400 shades of Tailwind's palette, readable on the matte-black panels). The accent blue
+is left out so the playhead and the selected clip stay distinct, and so are the exact red and green of destructive
+actions and status dots. The order puts far-apart hues next to each other.
+
+- A new clip takes the palette colour for its id (id 1 teal, id 2 amber, …, wrapping after ten), or the next one
+  after it that none of its neighbours has: the clips before and after it in the output and on the timeline.
+- Split halves get different colours: they are neighbours in both orders, and a different colour makes the cut
+  visible. The first half keeps the clip's colour, the second gets a new one. Parts of a cut are coloured the same way.
+- The colour is changed from the swatch in the clip list (a picker of the ten swatches) or the clip list's context
+  menu (Colour ›). It is an edit (`SetClipColorCommand`), so it can be undone.
+- Files saved before clips had colours, or with a colour this version does not know, get them on load the same
+  way, in output order.
+
+On the timeline a segment is tinted with its clip's colour and has a 3 px stripe of it along the top. The selected
+clip gets a stronger tint and a 1.5 px accent border; an excluded clip has no tint, the dashed grey border and a faded
+stripe; Claude's pulsing ring is drawn over any of them. The clip list shows the colour as a swatch before the name.
+Claude's `get_project` and every edit result list each clip's `color` by name.
+
 ## Project file (`.ourcut.json`)
 
 ```json
@@ -403,8 +443,9 @@ and Whisper large-v3-turbo, small and base.en (99 languages; base.en English onl
     "frameRate": 29.97,
     "audioStreams": [ { "index": 1, "label": "Mic" }, { "index": 2, "label": "Game", "gainDb": -6, "muted": true } ]
   },
+  "lastClipId": 7,
   "clips": [
-    { "id": 1, "label": "Intro", "start": 12.04, "end": 45.32, "included": true }
+    { "id": 1, "label": "Intro", "start": 12.04, "end": 45.32, "included": true, "color": "teal" }
   ]
 }
 ```
@@ -413,5 +454,8 @@ and Whisper large-v3-turbo, small and base.en (99 languages; base.en English onl
 - Times are seconds with an invariant decimal point.
 - `gainDb` (a track's volume) and `muted` are left out at their defaults (0 dB, not muted), so files from before
   they existed load with every track at 0 dB. Out-of-range volumes are clamped to −40…+12 dB.
+- `lastClipId` is the highest clip id handed out, deleted clips included; without it (older files) the highest id in
+  the file is used. `color` is a palette name; clips without one get one on load. Names that appear twice get
+  " · 2" added on load (see "Clip names and colours").
 - Readers ignore unknown fields. Files with a higher `version` than the app supports are rejected.
 - Files are written atomically (temporary file, then replace). A saved project is autosaved after edits.

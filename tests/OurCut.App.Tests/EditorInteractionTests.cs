@@ -120,7 +120,8 @@ public class EditorInteractionTests
         Assert.Equal(6, editor.Clips.Count);
         Assert.Equal(t, clip.End);
         var second = editor.SelectedClip!;
-        Assert.Equal("Setup walkthrough (b)", second.Label);
+        Assert.Equal("Clip 6", second.Label);
+        Assert.NotEqual(clip.Color, second.Color);
         Assert.Equal(t, second.Start);
         Assert.Equal(end, second.End);
         Assert.Equal(editor.Clips.IndexOf(clip) + 1, editor.Clips.IndexOf(second));
@@ -248,7 +249,7 @@ public class EditorInteractionTests
     {
         var (window, editor) = Open();
         var intro = editor.Clips[0];
-        var remove = Row(window, intro).GetVisualDescendants().OfType<Button>().Single(b => b is not CheckBox);
+        var remove = Row(window, intro).GetVisualDescendants().OfType<Button>().Single(b => b is not CheckBox && !b.Classes.Contains("swatch"));
         Click(window, Center(window, remove));
         Assert.DoesNotContain(intro, editor.Clips);
         Assert.Equal(4, editor.Clips.Count);

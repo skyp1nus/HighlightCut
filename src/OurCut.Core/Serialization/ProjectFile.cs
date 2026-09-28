@@ -1,4 +1,3 @@
-using System.Collections.Immutable;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -53,7 +52,11 @@ public static class ProjectFile
                     AudioStreams = [.. s.AudioTracks.Select(a => AudioStream(a, project.MixOf(a.Index)))],
                 }
                 : null,
-            Clips = [.. project.Clips.Select(c => new ClipDto { Id = c.Id, Label = c.Label, Start = c.Start, End = c.End, Included = c.IsIncluded })],
+            LastClipId = project.NextClipId - 1,
+            Clips = [.. project.Clips.Select(c => new ClipDto
+            {
+                Id = c.Id, Label = c.Label, Start = c.Start, End = c.End, Included = c.IsIncluded, Color = ClipPalette.Key(c.Color),
+            })],
         };
         return JsonSerializer.Serialize(dto, ProjectJsonContext.Default.ProjectDto);
     }
@@ -91,19 +94,28 @@ public static class ProjectFile
                 [.. (s.AudioStreams ?? []).Select(a => new AudioTrack(a.Index, a.Label ?? $"Audio {a.Index}"))]);
         }
 
-        var clips = ImmutableList.CreateBuilder<Clip>();
+        // Files saved before clip names were unique can have the same name twice: the first clip keeps it and the
+        // others get " · 2", " · 3"…. Files saved before clips had colours (or with a colour this version does not
+        // know) get them as new clips would.
+        var clips = new List<Clip>();
         var ids = new HashSet<int>();
+        var uncoloured = new HashSet<int>();
         foreach (var c in dto.Clips ?? [])
         {
             if (!ids.Add(c.Id))
                 throw new ProjectFileException($"Clip id {c.Id} appears twice.");
             if (!(c.End > c.Start) || c.Start < 0 || double.IsInfinity(c.End))
                 throw new ProjectFileException($"Clip {c.Id} has an invalid range ({c.Start}–{c.End}).");
-            clips.Add(new Clip(c.Id, string.IsNullOrWhiteSpace(c.Label) ? $"Clip {c.Id}" : c.Label, c.Start, c.End, c.Included));
+            string label = ClipNames.Unique(clips, string.IsNullOrWhiteSpace(c.Label) ? ClipNames.Default(c.Id) : c.Label);
+            if (!ClipPalette.TryParse(c.Color, out var color))
+                uncoloured.Add(c.Id);
+            clips.Add(new Clip(c.Id, label, c.Start, c.End, c.Included, color));
         }
 
         // Files saved before tracks had a volume have none: every track plays at 0 dB, unmuted.
-        var project = new Project(string.IsNullOrWhiteSpace(dto.Name) ? "Untitled project" : dto.Name, source, clips.ToImmutable());
+        var project = new Project(string.IsNullOrWhiteSpace(dto.Name) ? "Untitled project" : dto.Name, source,
+            [.. ClipPalette.Fill(clips, uncoloured)]) { LastClipId = Math.Max(0, dto.LastClipId ?? 0) };
+        project = project.WithClips(project.Clips);
         foreach (var a in dto.Source?.AudioStreams ?? [])
             project = project.WithMix(new TrackMix(a.Index, TrackMix.ClampGain(a.GainDb ?? 0), a.Muted ?? false));
         return project;
@@ -177,6 +189,10 @@ internal sealed class ProjectDto
     public int Version { get; set; }
     public string? Name { get; set; }
     public SourceDto? Source { get; set; }
+
+    /// <summary>The highest clip id handed out (<see cref="Project.LastClipId"/>); absent in older files.</summary>
+    public int? LastClipId { get; set; }
+
     public List<ClipDto>? Clips { get; set; }
 }
 
@@ -207,6 +223,9 @@ internal sealed class ClipDto
     public double Start { get; set; }
     public double End { get; set; }
     public bool Included { get; set; } = true;
+
+    /// <summary>A <see cref="ClipColor"/> name, e.g. "teal"; absent in older files.</summary>
+    public string? Color { get; set; }
 }
 
 [JsonSourceGenerationOptions(

@@ -133,7 +133,7 @@ public class ProjectFileTests
         var p = ProjectFile.Deserialize(json);
         Assert.Equal("Untitled project", p.Name);
         Assert.Null(p.Source);
-        Assert.Equal(new Clip(3, "Clip 3", 1.5, 4), Assert.Single(p.Clips));
+        Assert.Equal(new Clip(3, "Clip 3", 1.5, 4, Color: ClipColor.Violet), Assert.Single(p.Clips));
     }
 
     [Fact]

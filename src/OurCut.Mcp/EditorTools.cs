@@ -23,7 +23,9 @@ public sealed record ClipInfo(
     [property: Description("End in seconds on the source timeline.")] double End,
     double Duration,
     [property: Description("False for excluded clips: kept in the project, left out of the export.")] bool Included,
-    [property: Description("Start–end as MM:SS.mmm, as the editor shows it.")] string Range);
+    [property: Description("Start–end as MM:SS.mmm, as the editor shows it.")] string Range,
+    [property: Description("Colour of the clip in the editor: teal, amber, violet, rose, lime, cyan, orange, indigo, emerald or pink.")]
+    string Color);
 
 public sealed record AudioTrackInfo(
     int Track,
@@ -113,13 +115,16 @@ public sealed record ScenesResult(
 
 /// <summary>One step of <c>edit_timeline</c>.</summary>
 public sealed record EditOperation(
-    [property: Description("add, remove, trim, split, include, exclude, move or rename.")] string Action,
+    [property: Description("add, remove, trim, split, include, exclude, move, rename or color.")] string Action,
     [property: Description("Clip id (all actions except add).")] int? Clip = null,
     [property: Description("Seconds: the range for add, a new start for trim.")] double? Start = null,
     [property: Description("Seconds: the range for add, a new end for trim.")] double? End = null,
     [property: Description("Seconds: where to split.")] double? Time = null,
-    [property: Description("Label for add or rename.")] string? Label = null,
-    [property: Description("1-based output position for add or move.")] int? Position = null);
+    [property: Description("Label for add or rename. Clip names are unique: a taken name is refused on rename and gets \" · 2\" added on add.")]
+    string? Label = null,
+    [property: Description("1-based output position for add or move.")] int? Position = null,
+    [property: Description("Colour for add or color: teal, amber, violet, rose, lime, cyan, orange, indigo, emerald or pink.")]
+    string? Color = null);
 
 /// <summary>
 /// The MCP tools: reading the project and editing it through OurCut.Core's commands, so every edit
@@ -273,9 +278,12 @@ public sealed class EditorTools(IEditorHost host)
     public Task<EditResult> AddSegment(
         [Description("Seconds.")] double start,
         [Description("Seconds.")] double end,
-        [Description("Short name shown in the clip list.")] string? label = null,
-        [Description("1-based output position; the end if omitted.")] int? position = null) =>
-        Edit(_ => new AddClipCommand(start, end, label, position - 1));
+        [Description("Short name shown in the clip list; \"Clip N\" if omitted. A name another clip has gets \" · 2\" added.")]
+        string? label = null,
+        [Description("1-based output position; the end if omitted.")] int? position = null,
+        [Description("teal, amber, violet, rose, lime, cyan, orange, indigo, emerald or pink; by default the next colour its neighbours do not have.")]
+        string? color = null) =>
+        Edit(_ => new AddClipCommand(start, end, label, position - 1, Color: color is null ? null : ParseColor(color)));
 
     [McpServerTool(Name = "remove_segment", Title = "Remove a clip", Destructive = true)]
     [Description("Removes a clip from the project. To only leave it out of the export, use set_included instead.")]
@@ -302,8 +310,15 @@ public sealed class EditorTools(IEditorHost host)
         Edit(_ => new MoveClipCommand(clip, position - 1));
 
     [McpServerTool(Name = "set_label", Title = "Rename a clip")]
-    [Description("Renames a clip. Labels become chapter titles and file names on export.")]
+    [Description("Renames a clip. Labels become chapter titles and file names on export. Clip names are unique: a name another " +
+                 "clip has is refused.")]
     public Task<EditResult> SetLabel(int clip, string label) => Edit(_ => new RenameClipCommand(clip, label));
+
+    [McpServerTool(Name = "set_color", Title = "Colour a clip")]
+    [Description("Sets the colour a clip has on the timeline and in the clip list, e.g. to group related clips.")]
+    public Task<EditResult> SetColor(int clip,
+        [Description("teal, amber, violet, rose, lime, cyan, orange, indigo, emerald or pink.")] string color) =>
+        Edit(_ => new SetClipColorCommand(clip, ParseColor(color)));
 
     [McpServerTool(Name = "edit_timeline", Title = "Make several edits")]
     [Description("Applies several edits in order as one undo step, e.g. keeping a list of ranges or excluding several clips. " +
@@ -794,7 +809,8 @@ public sealed class EditorTools(IEditorHost host)
         double Need(double? value, string name) => value ?? throw new EditException($"“{op.Action}” needs {name}.");
         return op.Action.Trim().ToLowerInvariant() switch
         {
-            "add" => new AddClipCommand(Need(op.Start, "start"), Need(op.End, "end"), op.Label, op.Position - 1),
+            "add" => new AddClipCommand(Need(op.Start, "start"), Need(op.End, "end"), op.Label, op.Position - 1,
+                Color: op.Color is null ? null : ParseColor(op.Color)),
             "remove" => new RemoveClipCommand(Clip()),
             "trim" => new PartialTrimCommand(Clip(), op.Start, op.End),
             "split" => new SplitClipCommand(Clip(), Need(op.Time, "time")),
@@ -802,9 +818,15 @@ public sealed class EditorTools(IEditorHost host)
             "exclude" => new SetClipIncludedCommand(Clip(), false),
             "move" => new MoveClipCommand(Clip(), (op.Position ?? throw new EditException("“move” needs a position.")) - 1),
             "rename" => new RenameClipCommand(Clip(), op.Label ?? throw new EditException("“rename” needs a label.")),
-            _ => throw new EditException($"Unknown action “{op.Action}”; use add, remove, trim, split, include, exclude, move or rename."),
+            "color" or "colour" => new SetClipColorCommand(Clip(), ParseColor(op.Color ?? throw new EditException("“color” needs a color."))),
+            _ => throw new EditException($"Unknown action “{op.Action}”; use add, remove, trim, split, include, exclude, move, rename or color."),
         };
     }
+
+    private static ClipColor ParseColor(string name) =>
+        ClipPalette.TryParse(name, out var color)
+            ? color
+            : throw new EditException($"“{name}” is not a clip colour; use {string.Join(", ", ClipPalette.Colors.Select(ClipPalette.Key))}.");
 
     private static EditResult Result(IEditorContext ctx, HistoryEntry? entry)
     {
@@ -829,7 +851,7 @@ public sealed class EditorTools(IEditorHost host)
 
     private static List<ClipInfo> Clips(Project project) =>
         [.. project.Clips.Select((c, i) => new ClipInfo(c.Id, i + 1, c.Label, Round(c.Start), Round(c.End), Round(c.Duration), c.IsIncluded,
-            RangeText(c.Start, c.End)))];
+            RangeText(c.Start, c.End), ClipPalette.Key(c.Color)))];
 
     private static double Round(double seconds) => Math.Round(seconds, 3);
 

@@ -13,7 +13,7 @@ public class CommandTests
     {
         var after = new AddClipCommand(100, 110).Apply(P);
         var clip = after.Clips[^1];
-        Assert.Equal(new Clip(7, "Clip 7", 100, 110), clip);
+        Assert.Equal(new Clip(7, "Clip 7", 100, 110, Color: ClipColor.Orange), clip);
         Assert.Equal("Added clip 7", new AddClipCommand(100, 110).Describe(P));
     }
 
@@ -21,7 +21,7 @@ public class CommandTests
     public void Add_can_insert_at_a_position_with_an_explicit_id()
     {
         var after = new AddClipCommand(50, 60, "Break", Index: 1, Id: 42).Apply(P);
-        Assert.Equal(new Clip(42, "Break", 50, 60), after.Clips[1]);
+        Assert.Equal(new Clip(42, "Break", 50, 60, Color: ClipColor.Violet), after.Clips[1]);
         Assert.Throws<EditException>(() => new AddClipCommand(50, 60, Id: 3).Apply(P));
         Assert.Throws<EditException>(() => new AddClipCommand(50, 60, Index: 9).Apply(P));
     }
@@ -67,8 +67,8 @@ public class CommandTests
     public void Split_keeps_the_first_part_and_inserts_the_second_after_it()
     {
         var after = new SplitClipCommand(3, 301.42).Apply(P);
-        Assert.Equal(new Clip(3, "Demo — import", 242.88, 301.42), after.Clips[2]);
-        Assert.Equal(new Clip(7, "Demo — import (b)", 301.42, 404.0), after.Clips[3]);
+        Assert.Equal(new Clip(3, "Demo — import", 242.88, 301.42, Color: ClipColor.Violet), after.Clips[2]);
+        Assert.Equal(new Clip(7, "Clip 7", 301.42, 404.0, Color: ClipColor.Orange), after.Clips[3]);
         Assert.Equal(P.OutputDuration, after.OutputDuration, 6);
     }
 
@@ -150,8 +150,8 @@ public class CutRangesCommandTests
 
         Assert.Equal(
         [
-            new Clip(1, "Intro", 12.04, 20), new Clip(7, "Intro (2)", 22, 44), new Clip(2, "Setup", 120, 190.12),
-            new Clip(3, "Demo — import", 242.88, 404.0),
+            new Clip(1, "Intro", 12.04, 20, Color: ClipColor.Teal), new Clip(7, "Clip 7", 22, 44, Color: ClipColor.Orange),
+            new Clip(2, "Setup", 120, 190.12, Color: ClipColor.Amber), new Clip(3, "Demo — import", 242.88, 404.0, Color: ClipColor.Violet),
         ], after.Clips.Take(4));
         Assert.Equal(P.Clips.Count + 1, after.Clips.Count);
         Assert.Equal(P.OutputDuration - 2 - 1.32 - 1.4, after.OutputDuration, 6);
@@ -165,7 +165,7 @@ public class CutRangesCommandTests
         Assert.Same(P, new CutRangesCommand([pause]).Apply(P));
 
         var after = new CutRangesCommand([pause], ClipIds: [6], Name: "cut_silences", Description: "Removed 1 silence").Apply(P);
-        Assert.Equal([new Clip(6, "Q&A", 640, 650, false), new Clip(7, "Q&A (2)", 660, 728.4, false)],
+        Assert.Equal([new Clip(6, "Q&A", 640, 650, false, ClipColor.Orange), new Clip(7, "Clip 7", 660, 728.4, false, ClipColor.Indigo)],
             after.Clips.Where(c => !c.IsIncluded));
     }
 
@@ -183,7 +183,8 @@ public class CutRangesCommandTests
     public void Overlapping_ranges_are_joined_and_bad_input_is_refused()
     {
         var after = new CutRangesCommand([new(30, 35), new(20, 32), new(40, 38)]).Apply(P);
-        Assert.Equal([new Clip(1, "Intro", 12.04, 20), new Clip(7, "Intro (2)", 35, 45.32)], after.Clips.Take(2));
+        Assert.Equal([new Clip(1, "Intro", 12.04, 20, Color: ClipColor.Teal), new Clip(7, "Clip 7", 35, 45.32, Color: ClipColor.Orange)],
+            after.Clips.Take(2));
         Assert.Throws<EditException>(() => new CutRangesCommand([new(double.NaN, 3)]).Apply(P));
         Assert.Throws<EditException>(() => new CutRangesCommand([new(1, 3)], ClipIds: [99]).Apply(P));
     }

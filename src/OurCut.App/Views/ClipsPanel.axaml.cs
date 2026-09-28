@@ -1,8 +1,11 @@
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Presenters;
+using Avalonia.Controls.Primitives;
 using Avalonia.Input;
 using Avalonia.Interactivity;
+using Avalonia.LogicalTree;
+using Avalonia.Threading;
 using Avalonia.VisualTree;
 using OurCut.App.ViewModels;
 
@@ -108,6 +111,16 @@ public partial class ClipsPanel : UserControl
         _target = ReferenceEquals(clip, _pressed) ? null : clip;
         if (_target is not null)
             _target.IsDropTarget = true;
+    }
+
+    /// <summary>
+    /// A swatch in a clip's colour picker was clicked: the edit is made by its command, then the picker closes. Closing
+    /// waits a moment, since the command runs after this handler and the swatch loses its data once the picker is gone.
+    /// </summary>
+    private void OnColorPicked(object? sender, RoutedEventArgs e)
+    {
+        if ((sender as Control)?.FindLogicalAncestorOfType<Popup>() is { PlacementTarget: Button { Flyout: { } flyout } })
+            Dispatcher.UIThread.Post(flyout.Hide);
     }
 
     private static ClipViewModel? RowAt(Visual? visual) =>

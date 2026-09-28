@@ -1,4 +1,7 @@
+using System.Windows.Input;
+using Avalonia.Media;
 using CommunityToolkit.Mvvm.ComponentModel;
+using CommunityToolkit.Mvvm.Input;
 using OurCut.Core.Model;
 using OurCut.Core.Time;
 
@@ -12,11 +15,13 @@ namespace OurCut.App.ViewModels;
 public sealed partial class ClipViewModel : ViewModelBase
 {
     private readonly Action<ClipViewModel, bool>? _setIncluded;
+    private readonly Action<ClipViewModel, ClipColor>? _setColor;
 
-    public ClipViewModel(Clip clip, Action<ClipViewModel, bool>? setIncluded = null)
+    public ClipViewModel(Clip clip, Action<ClipViewModel, bool>? setIncluded = null, Action<ClipViewModel, ClipColor>? setColor = null)
     {
         Id = clip.Id;
         _setIncluded = setIncluded;
+        _setColor = setColor;
         Update(clip);
     }
 
@@ -36,6 +41,19 @@ public sealed partial class ClipViewModel : ViewModelBase
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(IncludeToggle))]
     public partial bool IsIncluded { get; private set; }
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ColorBrush), nameof(ColorName), nameof(ColorChoices))]
+    public partial ClipColor Color { get; private set; }
+
+    public IBrush ColorBrush => ClipBrushes.Solid(Color);
+
+    /// <summary>E.g. "Teal".</summary>
+    public string ColorName => Color.ToString();
+
+    /// <summary>The palette for the colour pickers, with this clip's colour marked; picking one is an edit.</summary>
+    public IReadOnlyList<ClipColorChoice> ColorChoices =>
+        [.. ClipPalette.Colors.Select(c => new ClipColorChoice(c, c == Color, new RelayCommand(() => _setColor?.Invoke(this, c))))];
 
     /// <summary>Two-way target for the include checkbox; setting it issues an edit.</summary>
     public bool IncludeToggle
@@ -100,5 +118,13 @@ public sealed partial class ClipViewModel : ViewModelBase
         Start = clip.Start;
         End = clip.End;
         IsIncluded = clip.IsIncluded;
+        Color = clip.Color;
     }
+}
+
+/// <summary>One colour in a clip's colour picker.</summary>
+public sealed record ClipColorChoice(ClipColor Color, bool IsCurrent, ICommand Pick)
+{
+    public string Name => Color.ToString();
+    public IBrush Brush => ClipBrushes.Solid(Color);
 }

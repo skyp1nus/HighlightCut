@@ -233,6 +233,9 @@ public sealed class EditorSession
     public void Rename(int clipId, string label, EditOrigin origin = EditOrigin.User) =>
         Execute(new RenameClipCommand(clipId, label), origin);
 
+    public void SetColor(int clipId, ClipColor color, EditOrigin origin = EditOrigin.User) =>
+        Execute(new SetClipColorCommand(clipId, color), origin);
+
     public void Remove(int clipId, EditOrigin origin = EditOrigin.User) =>
         Execute(new RemoveClipCommand(clipId), origin);
 }

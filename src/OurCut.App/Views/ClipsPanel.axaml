@@ -5,7 +5,7 @@
              xmlns:v="using:OurCut.App.Views"
              x:Class="OurCut.App.Views.ClipsPanel"
              x:DataType="vm:EditorViewModel">
-  <!-- Data-table rows: grip, #, label and in – out, duration, include switch, remove. -->
+  <!-- Data-table rows: grip, #, colour swatch, label and in – out, duration, include switch, remove. -->
   <Grid RowDefinitions="40,24,*,40">
     <!-- Tabs: Clips (with the count) and Transcript, and a hint on the right. -->
     <Border BorderBrush="{StaticResource DividerBrush}" BorderThickness="0,0,0,1" Padding="10,0,12,0">
@@ -28,11 +28,11 @@
     </Border>
 
     <Border Grid.Row="1" BorderBrush="{StaticResource DividerSoftBrush}" BorderThickness="0,0,0,1" Padding="12,0" IsVisible="{Binding IsClipsTab}">
-      <Grid Classes="cols" ColumnDefinitions="10,8,16,8,*,8,76,8,26,8,20">
+      <Grid Classes="cols" ColumnDefinitions="10,8,16,8,10,8,*,8,76,8,26,8,20">
         <TextBlock Grid.Column="2" Classes="colhead" Text="#" />
-        <TextBlock Grid.Column="4" Classes="colhead" Text="Label · In – Out" />
-        <TextBlock Grid.Column="6" Classes="colhead" Text="Duration" HorizontalAlignment="Right" />
-        <TextBlock Grid.Column="8" Classes="colhead" Text="Out" HorizontalAlignment="Center" />
+        <TextBlock Grid.Column="6" Classes="colhead" Text="Label · In – Out" />
+        <TextBlock Grid.Column="8" Classes="colhead" Text="Duration" HorizontalAlignment="Right" />
+        <TextBlock Grid.Column="10" Classes="colhead" Text="Out" HorizontalAlignment="Center" />
       </Grid>
     </Border>
 
@@ -49,6 +49,22 @@
               <MenuItem Header="{Binding ExcludeLabel}" InputGesture="E" Command="{Binding ToggleExcludeCommand}"
                         IsEnabled="{Binding HasSelection}" />
               <MenuItem Header="Split at playhead" InputGesture="S" Command="{Binding SplitCommand}" />
+              <MenuItem Classes="colors" Header="Colour" ItemsSource="{Binding SelectedClip.ColorChoices, FallbackValue={x:Null}}"
+                        IsEnabled="{Binding HasSelection}">
+                <MenuItem.Styles>
+                  <Style Selector="MenuItem.colors > MenuItem" x:DataType="vm:ClipColorChoice">
+                    <Setter Property="Header" Value="{Binding Name}" />
+                    <Setter Property="Command" Value="{Binding Pick}" />
+                    <Setter Property="Icon">
+                      <Template>
+                        <Border Width="10" Height="10" CornerRadius="3" Background="{Binding Brush}" />
+                      </Template>
+                    </Setter>
+                    <Setter Property="ToggleType" Value="Radio" />
+                    <Setter Property="IsChecked" Value="{Binding IsCurrent}" />
+                  </Style>
+                </MenuItem.Styles>
+              </MenuItem>
               <Separator />
               <MenuItem Header="Delete clip" InputGesture="Delete" Command="{Binding DeleteClipCommand}"
                         IsEnabled="{Binding HasSelection}" />
@@ -61,7 +77,7 @@
                       Classes.over="{Binding IsDropTarget}" Classes.dragging="{Binding IsDragSource}">
                 <Panel>
                   <Border Classes="dropline" Height="1" VerticalAlignment="Top" Margin="-12,0" />
-                  <Grid ColumnDefinitions="10,8,16,8,*,8,76,8,26,8,20">
+                  <Grid ColumnDefinitions="10,8,16,8,10,8,*,8,76,8,26,8,20">
                     <!-- Grip: 2 × 3 dots. -->
                     <Grid Classes="grip" ColumnDefinitions="2,2,2" RowDefinitions="2,2,2,2,2" VerticalAlignment="Center"
                           HorizontalAlignment="Left" Background="Transparent" Cursor="SizeAll">
@@ -73,16 +89,39 @@
                       <Border Grid.Column="2" Grid.Row="4" />
                     </Grid>
                     <TextBlock Grid.Column="2" Classes="mono num" Text="{Binding Number}" FontSize="11" VerticalAlignment="Center" />
-                    <StackPanel Grid.Column="4" Classes="fade" Spacing="2" VerticalAlignment="Center">
+                    <!-- The clip's colour; a click opens the swatches. -->
+                    <Button Grid.Column="4" Classes="swatch" Width="10" Height="10" CornerRadius="3" Background="{Binding ColorBrush}"
+                            VerticalAlignment="Center" ToolTip.Tip="{Binding ColorName, StringFormat='Colour: {0}'}">
+                      <Button.Flyout>
+                        <Flyout Placement="BottomEdgeAlignedLeft">
+                          <ItemsControl Classes="swatches" ItemsSource="{Binding ColorChoices}">
+                            <ItemsControl.ItemsPanel>
+                              <ItemsPanelTemplate>
+                                <UniformGrid Columns="5" />
+                              </ItemsPanelTemplate>
+                            </ItemsControl.ItemsPanel>
+                            <ItemsControl.ItemTemplate>
+                              <DataTemplate x:DataType="vm:ClipColorChoice">
+                                <Button Classes="pick" Classes.current="{Binding IsCurrent}" Command="{Binding Pick}" Click="OnColorPicked"
+                                        ToolTip.Tip="{Binding Name}">
+                                  <Border Width="16" Height="16" CornerRadius="4" Background="{Binding Brush}" />
+                                </Button>
+                              </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                          </ItemsControl>
+                        </Flyout>
+                      </Button.Flyout>
+                    </Button>
+                    <StackPanel Grid.Column="6" Classes="fade" Spacing="2" VerticalAlignment="Center">
                       <TextBlock Text="{Binding Label}" Foreground="{StaticResource TextBrush}" TextTrimming="CharacterEllipsis" />
                       <TextBlock Classes="mono" Text="{Binding RangeText}" FontSize="10.5" LetterSpacing="-0.2"
                                  Foreground="{StaticResource MutedBrush}" />
                     </StackPanel>
-                    <TextBlock Grid.Column="6" Classes="mono fade" Text="{Binding ShortDurationText}" FontSize="11"
+                    <TextBlock Grid.Column="8" Classes="mono fade" Text="{Binding ShortDurationText}" FontSize="11"
                                Foreground="{StaticResource Text2Brush}" HorizontalAlignment="Right" VerticalAlignment="Center" />
-                    <CheckBox Grid.Column="8" Theme="{StaticResource Switch}" HorizontalAlignment="Center" VerticalAlignment="Center"
+                    <CheckBox Grid.Column="10" Theme="{StaticResource Switch}" HorizontalAlignment="Center" VerticalAlignment="Center"
                               ToolTip.Tip="Include in output" IsChecked="{Binding IncludeToggle}" />
-                    <Button Grid.Column="10" Classes="ghost risky" Width="20" Height="20" CornerRadius="5"
+                    <Button Grid.Column="12" Classes="ghost risky" Width="20" Height="20" CornerRadius="5"
                             ToolTip.Tip="Remove (Del)"
                             Command="{Binding $parent[UserControl].((vm:EditorViewModel)DataContext).RemoveClipCommand}"
                             CommandParameter="{Binding}">
@@ -155,6 +194,54 @@
     </Style>
     <Style Selector="Border.row.off :is(Control).fade">
       <Setter Property="Opacity" Value="0.45" />
+    </Style>
+    <!-- Swatches: a plain rounded square, lit up a little on hover; the current colour in the picker has a ring. -->
+    <Style Selector="Button.swatch">
+      <Setter Property="Padding" Value="0" />
+      <Setter Property="MinWidth" Value="0" />
+      <Setter Property="MinHeight" Value="0" />
+      <Setter Property="BorderThickness" Value="0" />
+      <Setter Property="Cursor" Value="Hand" />
+      <Setter Property="Template">
+        <ControlTemplate>
+          <Border Background="{TemplateBinding Background}" CornerRadius="{TemplateBinding CornerRadius}" />
+        </ControlTemplate>
+      </Setter>
+    </Style>
+    <Style Selector="Border.row.off Button.swatch">
+      <Setter Property="Opacity" Value="0.45" />
+    </Style>
+    <Style Selector="Button.swatch:pointerover">
+      <Setter Property="RenderTransform" Value="scale(1.2)" />
+    </Style>
+    <Style Selector="ItemsControl.swatches">
+      <Setter Property="Margin" Value="-2" />
+    </Style>
+    <Style Selector="Button.pick">
+      <Setter Property="Padding" Value="2" />
+      <Setter Property="Margin" Value="2" />
+      <Setter Property="MinWidth" Value="0" />
+      <Setter Property="MinHeight" Value="0" />
+      <Setter Property="CornerRadius" Value="6" />
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="BorderBrush" Value="Transparent" />
+      <Setter Property="BorderThickness" Value="1.5" />
+      <Setter Property="Cursor" Value="Hand" />
+      <Setter Property="Template">
+        <ControlTemplate>
+          <Border Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}"
+                  BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="{TemplateBinding CornerRadius}"
+                  Padding="{TemplateBinding Padding}">
+            <ContentPresenter Content="{TemplateBinding Content}" />
+          </Border>
+        </ControlTemplate>
+      </Setter>
+    </Style>
+    <Style Selector="Button.pick:pointerover">
+      <Setter Property="Background" Value="{StaticResource ControlHoverBrush}" />
+    </Style>
+    <Style Selector="Button.pick.current">
+      <Setter Property="BorderBrush" Value="{StaticResource TextBrush}" />
     </Style>
   </UserControl.Styles>
 </UserControl>

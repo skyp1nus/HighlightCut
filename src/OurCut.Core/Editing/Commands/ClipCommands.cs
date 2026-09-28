@@ -1,13 +1,16 @@
-using System.Collections.Immutable;
 using OurCut.Core.Model;
 using OurCut.Core.Time;
 
 namespace OurCut.Core.Editing.Commands;
 
-/// <summary>Adds a clip. Without an index it goes to the end of the output.</summary>
+/// <summary>
+/// Adds a clip. Without an index it goes to the end of the output. Its name is <paramref name="Label"/>, or "Clip N"
+/// without one, made unique (see <see cref="ClipNames"/>); without a colour it gets the next one of the palette that
+/// its neighbours do not have (see <see cref="ClipPalette"/>).
+/// </summary>
 /// <param name="Id">Explicit id (e.g. to restore a removed clip); by default the next free id.</param>
-public sealed record AddClipCommand(double Start, double End, string? Label = null, int? Index = null, int? Id = null, bool IsIncluded = true)
-    : IEditCommand
+public sealed record AddClipCommand(double Start, double End, string? Label = null, int? Index = null, int? Id = null, bool IsIncluded = true,
+    ClipColor? Color = null) : IEditCommand
 {
     public string Name => "add_segment";
 
@@ -23,8 +26,9 @@ public sealed record AddClipCommand(double Start, double End, string? Label = nu
         int index = Index ?? project.Clips.Count;
         if (index < 0 || index > project.Clips.Count)
             throw new EditException($"Position {index + 1} is outside the clip list (1–{project.Clips.Count + 1}).");
-        var clip = new Clip(id, string.IsNullOrWhiteSpace(Label) ? $"Clip {id}" : Label.Trim(), Start, End, IsIncluded);
-        return project with { Clips = project.Clips.Insert(index, clip) };
+        var clip = new Clip(id, ClipNames.ForNewClip(project.Clips, id, Label), Start, End, IsIncluded,
+            Color ?? ClipPalette.ForNewClip(project.Clips, index, id, Start));
+        return project.WithClips(project.Clips.Insert(index, clip));
     }
 }
 
@@ -38,7 +42,7 @@ public sealed record RemoveClipCommand(int ClipId) : IEditCommand
     public Project Apply(Project project)
     {
         var clip = project.Get(ClipId);
-        return project with { Clips = project.Clips.Remove(clip) };
+        return project.WithClips(project.Clips.Remove(clip));
     }
 }
 
@@ -71,7 +75,11 @@ public sealed record SetClipRangeCommand(int ClipId, double Start, double End) :
     }
 }
 
-/// <summary>Splits a clip in two at a source time. The second part is placed right after the first.</summary>
+/// <summary>
+/// Splits a clip in two at a source time. The first part keeps the clip's id, name and colour. The second part is a new
+/// clip placed right after it: "Clip N" with the next id, and the next palette colour that differs from the first
+/// part's and the following clip's, so the cut stays visible on the timeline.
+/// </summary>
 public sealed record SplitClipCommand(int ClipId, double At) : IEditCommand
 {
     public string Name => "split_segment";
@@ -84,9 +92,12 @@ public sealed record SplitClipCommand(int ClipId, double At) : IEditCommand
         if (At < clip.Start + EditRules.MinClipDuration - EditRules.Epsilon || At > clip.End - EditRules.MinClipDuration + EditRules.Epsilon)
             throw new EditException($"Split point must be at least {EditRules.MinClipDuration} s inside clip {project.NumberOf(ClipId)}.");
         var first = clip with { End = At };
-        var second = new Clip(project.NextClipId, clip.Label + " (b)", At, clip.End, clip.IsIncluded);
         int i = project.IndexOf(ClipId);
-        return project with { Clips = project.Clips.SetItem(i, first).Insert(i + 1, second) };
+        int id = project.NextClipId;
+        var clips = project.Clips.SetItem(i, first);
+        var second = new Clip(id, ClipNames.ForNewClip(clips, id), At, clip.End, clip.IsIncluded,
+            ClipPalette.ForNewClip(clips, i + 1, id, At));
+        return project.WithClips(clips.Insert(i + 1, second));
     }
 
     /// <summary>Id the second part will get when applied to <paramref name="project"/>.</summary>
@@ -129,7 +140,7 @@ public sealed record MoveClipCommand(int ClipId, int ToIndex) : IEditCommand
     }
 }
 
-/// <summary>Renames a clip.</summary>
+/// <summary>Renames a clip. A name another clip has (ignoring case) is refused: clip names are unique.</summary>
 public sealed record RenameClipCommand(int ClipId, string Label) : IEditCommand
 {
     public string Name => "set_label";
@@ -142,9 +153,27 @@ public sealed record RenameClipCommand(int ClipId, string Label) : IEditCommand
         if (string.IsNullOrWhiteSpace(Label))
             throw new EditException("Clip names cannot be empty.");
         string label = Label.Trim();
+        if (ClipNames.Owner(project.Clips, label, ClipId) is { } other)
+            throw new EditException($"Clip {project.NumberOf(other.Id)} is already called “{other.Label}”; clip names must be unique.");
         return clip.Label == label
             ? project
             : project with { Clips = project.Clips.Replace(clip, clip with { Label = label }) };
+    }
+}
+
+/// <summary>Sets a clip's colour.</summary>
+public sealed record SetClipColorCommand(int ClipId, ClipColor Color) : IEditCommand
+{
+    public string Name => "set_color";
+
+    public string Describe(Project before) => $"Coloured clip {before.NumberOf(ClipId)} {ClipPalette.Key(Color)}";
+
+    public Project Apply(Project project)
+    {
+        var clip = project.Get(ClipId);
+        return clip.Color == Color
+            ? project
+            : project with { Clips = project.Clips.Replace(clip, clip with { Color = Color }) };
     }
 }
 
@@ -163,8 +192,9 @@ public sealed record BatchCommand(string Name, string Description, IReadOnlyList
 
 /// <summary>
 /// Cuts source ranges (e.g. silences) out of clips: a clip overlapping a range is trimmed or split around it,
-/// and removed when nothing of it is left. The first remaining part keeps the clip's id and label; the others
-/// get new ids and "(2)", "(3)"… labels and follow it in the output. Parts shorter than
+/// and removed when nothing of it is left. The first remaining part keeps the clip's id, name and colour; the others
+/// are new clips named and coloured like the second part of a split ("Clip N", a colour unlike their neighbours') that
+/// follow it in the output. Parts shorter than
 /// <see cref="EditRules.MinClipDuration"/> are dropped.
 /// </summary>
 /// <param name="ClipIds">Clips to cut; every included clip if null.</param>
@@ -191,9 +221,10 @@ public sealed record CutRangesCommand(IReadOnlyList<TimeRange> Ranges, IReadOnly
             : ClipIds.Select(id => project.Get(id).Id).ToHashSet();
         int nextId = project.NextClipId;
         bool changed = false;
-        var clips = ImmutableList.CreateBuilder<Clip>();
-        foreach (var clip in project.Clips)
+        var clips = new List<Clip>();
+        for (int k = 0; k < project.Clips.Count; k++)
         {
+            var clip = project.Clips[k];
             if (!targets.Contains(clip.Id) || !ranges.Any(r => r.End > clip.Start && r.Start < clip.End))
             {
                 clips.Add(clip);
@@ -203,12 +234,19 @@ public sealed record CutRangesCommand(IReadOnlyList<TimeRange> Ranges, IReadOnly
             var parts = Remaining(clip, ranges);
             for (int i = 0; i < parts.Count; i++)
             {
-                clips.Add(i == 0
-                    ? clip with { Start = parts[i].Start, End = parts[i].End }
-                    : new Clip(nextId++, $"{clip.Label} ({i + 1})", parts[i].Start, parts[i].End, clip.IsIncluded));
+                if (i == 0)
+                {
+                    clips.Add(clip with { Start = parts[i].Start, End = parts[i].End });
+                    continue;
+                }
+                // Named and coloured against the clips as they are at this point: the new ones so far and the rest.
+                var around = clips.Concat(project.Clips.Skip(k + 1)).ToList();
+                int id = nextId++;
+                clips.Add(new Clip(id, ClipNames.ForNewClip(around, id), parts[i].Start, parts[i].End, clip.IsIncluded,
+                    ClipPalette.ForNewClip(around, clips.Count, id, parts[i].Start)));
             }
         }
-        return changed ? project with { Clips = clips.ToImmutable() } : project;
+        return changed ? project.WithClips([.. clips]) : project;
     }
 
     /// <summary>Sorted ranges with overlapping ones joined.</summary>

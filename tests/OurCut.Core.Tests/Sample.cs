@@ -10,11 +10,11 @@ internal static class Sample
 
     public static Project Project { get; } = new("launch-keynote", Source,
     [
-        new Clip(1, "Intro", 12.04, 45.32),
-        new Clip(2, "Setup", 118.6, 190.12),
-        new Clip(3, "Demo — import", 242.88, 404.0),
-        new Clip(4, "Demo — trim", 495.2, 602.56),
-        new Clip(6, "Q&A", 640.0, 728.4, IsIncluded: false),
-        new Clip(5, "Outro", 750.0, 828.72),
+        new Clip(1, "Intro", 12.04, 45.32, Color: ClipColor.Teal),
+        new Clip(2, "Setup", 118.6, 190.12, Color: ClipColor.Amber),
+        new Clip(3, "Demo — import", 242.88, 404.0, Color: ClipColor.Violet),
+        new Clip(4, "Demo — trim", 495.2, 602.56, Color: ClipColor.Rose),
+        new Clip(6, "Q&A", 640.0, 728.4, IsIncluded: false, Color: ClipColor.Orange),
+        new Clip(5, "Outro", 750.0, 828.72, Color: ClipColor.Lime),
     ]);
 }
