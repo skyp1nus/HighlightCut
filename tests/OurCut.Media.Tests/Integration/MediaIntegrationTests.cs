@@ -1,5 +1,6 @@
 using System.Text.Json;
 using OurCut.Core.Model;
+using OurCut.Media.Analysis;
 using OurCut.Media.Caching;
 using OurCut.Media.Export;
 using OurCut.Media.Previews;
@@ -300,6 +301,37 @@ public class MediaIntegrationTests(SampleMediaFixture media) : IClassFixture<Sam
         var first = await MediaProbe.ProbeAsync(written[0], Ct);
         Assert.Equal(1.7, first.Duration, 0.05);
         Assert.Equal(["aac", "aac"], first.Audio.Select(a => a.Codec));
+    }
+
+    [Theory]
+    [InlineData("mp4", CutMode.Lossless, true)]
+    [InlineData("mkv", CutMode.Lossless, true)]
+    [InlineData("mp4", CutMode.Lossless, false)]
+    [InlineData("mp4", CutMode.Reencode, true)]
+    public async Task A_track_volume_changes_only_that_track(string kind, CutMode mode, bool merge)
+    {
+        media.SkipIfUnavailable();
+        var (info, keyframes) = await Analyse(kind == "mp4" ? media.Mp4 : media.Mkv);
+        string folder = media.NewOutputFolder();
+        var settings = Settings(folder) with
+        {
+            Mode = mode, Merge = merge, Video = VideoEncoding.H264Fast,
+            Container = kind == "mp4" ? OutputContainer.Mp4 : OutputContainer.Mkv,
+            AudioGainsDb = new Dictionary<int, double> { [info.Audio[1].Index] = -12 },
+        };
+        var plan = ExportPlanner.Plan(Project(info), info, keyframes, settings);
+
+        string output = (await ExportRunner.RunAsync(plan, cancellationToken: Ct))[0];
+
+        var result = await MediaProbe.ProbeAsync(output, Ct);
+        Assert.Equal(2, result.Audio.Length);
+        Assert.Equal("h264", result.Video?.Codec);
+        var wave = WaveformExtractor.Create(result);
+        await WaveformExtractor.ExtractAsync(result, wave, cancellationToken: Ct);
+        // lavfi's sine is at −18 dB; Music comes down 12 dB, Mic stays. (The level, not the loudest peak: a copied
+        // track can click where the pieces of a lossless merge join.)
+        Assert.Equal(-18, AudioLevels.Measure(wave, 0)!.Value.LevelDb, 0.5);
+        Assert.Equal(-30, AudioLevels.Measure(wave, 1)!.Value.LevelDb, 0.5);
     }
 
     [Fact]

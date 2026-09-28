@@ -551,19 +551,7 @@ public sealed partial class EditorViewModel : ViewModelBase
         Session.Load(project);
         Media = media;
         Claude.HasMedia = true;
-        AudioLanes.Clear();
-        var tracks = project.Source?.AudioTracks ?? [];
-        for (int i = 0; i < tracks.Length; i++)
-        {
-            var lane = new AudioLaneViewModel(i, "A" + (i + 1).ToString(CultureInfo.InvariantCulture), tracks[i].Label);
-            lane.PropertyChanged += (_, e) =>
-            {
-                if (e.PropertyName == nameof(AudioLaneViewModel.IsMuted))
-                    ApplyAudioTracks();
-                RaiseTimelineChanged();
-            };
-            AudioLanes.Add(lane);
-        }
+        CreateAudioLanes(project);
         Time = 0;
         RaiseProjectReplaced();
         if (_player is not null && media.IsPlayable && project.Source is { } source)
@@ -657,13 +645,6 @@ public sealed partial class EditorViewModel : ViewModelBase
             return;
         _playerLoaded = loaded;
         OnPropertyChanged(nameof(HasPlayback));
-    }
-
-    /// <summary>Muted lanes are left out of what the player plays (preview only).</summary>
-    private void ApplyAudioTracks()
-    {
-        if (HasPlayback)
-            _player!.SetAudioTracks([.. AudioLanes.Select(l => !l.IsMuted)]);
     }
 
     /// <summary>The player moved (playing, a frame step or a seek that landed): follow it.</summary>
@@ -1274,6 +1255,7 @@ public sealed partial class EditorViewModel : ViewModelBase
     private void OnSessionChanged(object? sender, ProjectChangedEventArgs e)
     {
         SyncClips(e.Current);
+        SyncAudioLanes(e.Current);
         if (e.Kind != ProjectChangeKind.Loaded)
         {
             IsDirty = true;

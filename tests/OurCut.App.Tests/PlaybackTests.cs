@@ -54,7 +54,9 @@ internal sealed class FakePlayer : IPlayer
     public void StepFrame(bool forward) => Calls.Add(forward ? "step +1" : "step -1");
     public void SetVolume(double volume) => Calls.Add(FormattableString.Invariant($"volume {volume:0.##}"));
     public void SetSpeed(double speed) => Calls.Add(FormattableString.Invariant($"speed {speed:0.##}"));
-    public void SetAudioTracks(IReadOnlyList<bool> enabled) => Calls.Add("tracks " + string.Concat(enabled.Select(e => e ? '1' : '0')));
+    public void SetAudioTracks(IReadOnlyList<bool> enabled, IReadOnlyList<double> gainsDb) =>
+        Calls.Add("tracks " + string.Concat(enabled.Select(e => e ? '1' : '0'))
+            + (gainsDb.Any(g => g != 0) ? " gains " + string.Join(",", gainsDb.Select(g => g.ToString(System.Globalization.CultureInfo.InvariantCulture))) : ""));
     public IReadOnlyList<OurCut.Media.Playback.AudioOutputDevice> Devices { get; set; } = [];
     public IReadOnlyList<OurCut.Media.Playback.AudioOutputDevice> AudioDevices() => Devices;
     public void SetAudioDevice(string? name) => Calls.Add("device " + (name ?? "default"));
@@ -82,6 +84,10 @@ internal sealed class FakeMediaOpener : IMediaOpener
         }
 
         public double AudioPeak(int stream, double startTime, double endTime) => 0.5;
+
+        /// <summary>Mic at −30 dB, Music at −10 dB.</summary>
+        public OurCut.Media.Analysis.AudioLevel? MeasureAudio(int stream) =>
+            stream == 0 ? new(-30, -20) : new(-10, -2);
 
         public void DrawFrame(DrawingContext context, Rect rect, double time, FrameLook look, int variant) =>
             context.FillRectangle(Brushes.DimGray, rect);

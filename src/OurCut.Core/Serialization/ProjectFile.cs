@@ -50,7 +50,7 @@ public static class ProjectFile
                     Path = StorePath(s.Path, baseDir),
                     Duration = s.Duration,
                     FrameRate = s.FrameRate,
-                    AudioStreams = [.. s.AudioTracks.Select(a => new AudioStreamDto { Index = a.Index, Label = a.Label })],
+                    AudioStreams = [.. s.AudioTracks.Select(a => AudioStream(a, project.MixOf(a.Index)))],
                 }
                 : null,
             Clips = [.. project.Clips.Select(c => new ClipDto { Id = c.Id, Label = c.Label, Start = c.Start, End = c.End, Included = c.IsIncluded })],
@@ -102,7 +102,11 @@ public static class ProjectFile
             clips.Add(new Clip(c.Id, string.IsNullOrWhiteSpace(c.Label) ? $"Clip {c.Id}" : c.Label, c.Start, c.End, c.Included));
         }
 
-        return new Project(string.IsNullOrWhiteSpace(dto.Name) ? "Untitled project" : dto.Name, source, clips.ToImmutable());
+        // Files saved before tracks had a volume have none: every track plays at 0 dB, unmuted.
+        var project = new Project(string.IsNullOrWhiteSpace(dto.Name) ? "Untitled project" : dto.Name, source, clips.ToImmutable());
+        foreach (var a in dto.Source?.AudioStreams ?? [])
+            project = project.WithMix(new TrackMix(a.Index, TrackMix.ClampGain(a.GainDb ?? 0), a.Muted ?? false));
+        return project;
     }
 
     /// <summary>Writes the project atomically (temporary file, then replace).</summary>
@@ -137,6 +141,15 @@ public static class ProjectFile
             ? file[..^Extension.Length]
             : Path.GetFileNameWithoutExtension(file);
     }
+
+    /// <summary>A track with its mix; the defaults (0 dB, unmuted) are left out of the file.</summary>
+    private static AudioStreamDto AudioStream(AudioTrack track, TrackMix mix) => new()
+    {
+        Index = track.Index,
+        Label = track.Label,
+        GainDb = mix.GainDb == 0 ? null : mix.GainDb,
+        Muted = mix.IsMuted ? true : null,
+    };
 
     private static string StorePath(string sourcePath, string? baseDir)
     {
@@ -179,6 +192,12 @@ internal sealed class AudioStreamDto
 {
     public int Index { get; set; }
     public string? Label { get; set; }
+
+    /// <summary>Volume in dB; absent for 0 dB.</summary>
+    public double? GainDb { get; set; }
+
+    /// <summary>Absent when the track is not muted.</summary>
+    public bool? Muted { get; set; }
 }
 
 internal sealed class ClipDto

@@ -1,6 +1,8 @@
 using System.Globalization;
 using System.Runtime.InteropServices;
+using System.Text;
 using System.Text.Json;
+using OurCut.Media.Ffmpeg;
 
 namespace OurCut.Media.Playback;
 
@@ -38,21 +40,43 @@ public sealed record MpvPlayerOptions
 public sealed record AudioOutputDevice(string Name, string Description);
 
 /// <summary>
-/// How mpv plays the audio tracks that are not muted: one track directly (<c>aid</c>), several mixed
-/// with <c>lavfi-complex</c>, none with <c>aid=no</c>.
+/// How mpv plays the audio tracks that are not muted: one track at 0 dB directly (<c>aid</c>), none with
+/// <c>aid=no</c>, anything else through <c>lavfi-complex</c>: a <c>volume</c> filter on each track whose gain is not
+/// 0 dB, then <c>amix</c> when there are several.
 /// </summary>
 public readonly record struct AudioMix(string AudioTrack, string LavfiComplex)
 {
     /// <param name="enabled">One entry per audio track, in the file's order.</param>
-    public static AudioMix For(IReadOnlyList<bool> enabled)
+    /// <param name="gainsDb">Volume of each track in dB, in the same order; all 0 dB if null.</param>
+    public static AudioMix For(IReadOnlyList<bool> enabled, IReadOnlyList<double>? gainsDb = null)
     {
+        double Gain(int i) => gainsDb is not null && i < gainsDb.Count ? gainsDb[i] : 0;
         var on = Enumerable.Range(0, enabled.Count).Where(i => enabled[i]).ToList();
         if (on.Count == 0)
             return new AudioMix("no", "");
-        if (on.Count == 1)
+        if (on.Count == 1 && Gain(on[0]) == 0)
             return new AudioMix((on[0] + 1).ToString(CultureInfo.InvariantCulture), "");
-        string inputs = string.Concat(on.Select(i => string.Create(CultureInfo.InvariantCulture, $"[aid{i + 1}]")));
-        return new AudioMix("auto", string.Create(CultureInfo.InvariantCulture, $"{inputs}amix=inputs={on.Count}:normalize=0[ao]"));
+
+        var graph = new StringBuilder();
+        var inputs = new StringBuilder();
+        foreach (int i in on)
+        {
+            string track = string.Create(CultureInfo.InvariantCulture, $"aid{i + 1}");
+            if (Gain(i) == 0)
+            {
+                inputs.Append('[').Append(track).Append(']');
+                continue;
+            }
+            // One track: its volume filter is the whole graph.
+            string output = on.Count == 1 ? "ao" : string.Create(CultureInfo.InvariantCulture, $"g{i + 1}");
+            graph.Append('[').Append(track).Append(']').Append(FfmpegText.VolumeFilter(Gain(i))).Append('[').Append(output).Append(']');
+            if (on.Count > 1)
+                graph.Append(';');
+            inputs.Append('[').Append(output).Append(']');
+        }
+        if (on.Count > 1)
+            graph.Append(inputs).Append(CultureInfo.InvariantCulture, $"amix=inputs={on.Count}:normalize=0[ao]");
+        return new AudioMix("auto", graph.ToString());
     }
 }
 
@@ -89,6 +113,9 @@ public sealed class MpvPlayer : IDisposable
     private int _videoWidth, _videoHeight;
     private string? _decoder;
     private MpvRenderer? _renderer;
+
+    /// <summary>The audio tracks last set; null until then, and once another file is loaded, so they are sent again.</summary>
+    private AudioMix? _audioMix;
 
     /// <summary>Checks that libmpv can be loaded.</summary>
     public static bool IsAvailable(out string? error) => MpvNative.TryLoad(out error);
@@ -187,6 +214,7 @@ public sealed class MpvPlayer : IDisposable
             _loading = tcs;
             _loadingPath = path;
             _openPath = path;
+            _audioMix = null;
             _errors.Clear();
         }
         // "start" and "pause" apply to the next file; loadfile's own option syntax differs between versions.
@@ -230,10 +258,20 @@ public sealed class MpvPlayer : IDisposable
 
     public void SetSpeed(double speed) => Command(0, "set", "speed", Seconds(Math.Clamp(speed, 0.01, 100)));
 
-    /// <summary>Plays only the enabled audio tracks, mixed if there are several.</summary>
-    public void SetAudioTracks(IReadOnlyList<bool> enabled)
+    /// <summary>
+    /// Plays only the enabled audio tracks, each at its volume, mixed if there are several. mpv rebuilds the filter
+    /// graph (a short gap in the sound) whenever it changes, so a call that changes nothing sends nothing.
+    /// </summary>
+    /// <param name="gainsDb">Volume of each track in dB; all 0 dB if null.</param>
+    public void SetAudioTracks(IReadOnlyList<bool> enabled, IReadOnlyList<double>? gainsDb = null)
     {
-        var mix = AudioMix.For(enabled);
+        var mix = AudioMix.For(enabled, gainsDb);
+        lock (_lock)
+        {
+            if (_audioMix == mix)
+                return;
+            _audioMix = mix;
+        }
         // Leave the complex graph first so a single track can be picked, or enter it after.
         if (mix.LavfiComplex.Length == 0)
         {

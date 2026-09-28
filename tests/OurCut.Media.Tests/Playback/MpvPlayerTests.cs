@@ -7,6 +7,23 @@ namespace OurCut.Media.Tests.Playback;
 public class AudioMixTests
 {
     [Fact]
+    public void One_track_with_a_volume_goes_through_a_volume_filter() =>
+        Assert.Equal(new AudioMix("auto", "[aid2]volume=-6dB[ao]"), AudioMix.For([false, true], [0, -6]));
+
+    [Fact]
+    public void Tracks_with_a_volume_are_filtered_before_the_mix()
+    {
+        Assert.Equal(new AudioMix("auto", "[aid1]volume=3.5dB[g1];[g1][aid2]amix=inputs=2:normalize=0[ao]"),
+            AudioMix.For([true, true], [3.5, 0]));
+        Assert.Equal(new AudioMix("auto", "[aid3]volume=0[g3];[aid1][g3]amix=inputs=2:normalize=0[ao]"),
+            AudioMix.For([true, false, true], [0, 12, -40]));
+    }
+
+    [Fact]
+    public void Muted_tracks_ignore_their_volume() =>
+        Assert.Equal(new AudioMix("1", ""), AudioMix.For([true, false], [0, -12]));
+
+    [Fact]
     public void One_enabled_track_is_played_directly() =>
         Assert.Equal(new AudioMix("2", ""), AudioMix.For([false, true, false]));
 
@@ -143,6 +160,17 @@ public sealed class MpvPlayerTests(SampleMediaFixture media) : IClassFixture<Sam
 
         player.SetAudioTracks([false, false]);
         await WaitUntil(() => player.GetPropertyString("aid") == "no");
+    }
+
+    [Fact]
+    public async Task Track_volumes_go_into_the_audio_mix()
+    {
+        var player = await LoadAsync();
+        player.SetAudioTracks([true, true], [-6, 0]);
+        await WaitUntil(() => player.GetPropertyString("lavfi-complex") == "[aid1]volume=-6dB[g1];[g1][aid2]amix=inputs=2:normalize=0[ao]");
+
+        player.SetAudioTracks([false, true], [-6, 3]);
+        await WaitUntil(() => player.GetPropertyString("lavfi-complex") == "[aid2]volume=3dB[ao]");
     }
 
     [Fact]

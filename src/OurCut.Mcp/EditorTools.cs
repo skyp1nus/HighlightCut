@@ -25,7 +25,11 @@ public sealed record ClipInfo(
     [property: Description("False for excluded clips: kept in the project, left out of the export.")] bool Included,
     [property: Description("Start–end as MM:SS.mmm, as the editor shows it.")] string Range);
 
-public sealed record AudioTrackInfo(int Track, string Label);
+public sealed record AudioTrackInfo(
+    int Track,
+    string Label,
+    [property: Description("Volume set in the editor, in dB: 0 is unchanged, -40 silent. It applies to the preview and the export.")] double VolumeDb,
+    [property: Description("Muted in the editor: not heard in the preview, and left out of exports that keep only unmuted tracks.")] bool Muted);
 
 public sealed record SourceInfo(string Path, string Summary, double Duration, double FrameRate, IReadOnlyList<AudioTrackInfo> AudioTracks);
 
@@ -813,12 +817,15 @@ public sealed class EditorTools(IEditorHost host)
         var project = ctx.Session.Project;
         var source = ctx.HasFile && project.Source is { } s
             ? new SourceInfo(s.Path, ctx.SourceSummary ?? Path.GetFileName(s.Path), Round(s.Duration), Math.Round(s.FrameRate, 3),
-                [.. s.AudioTracks.Select((t, i) => new AudioTrackInfo(i + 1, t.Label))])
+                [.. s.AudioTracks.Select((t, i) => TrackInfo(i + 1, t, project.MixOf(t.Index)))])
             : null;
         return new ProjectInfo(project.Name, source, ctx.ProjectPath, Round(ctx.Playhead), ctx.SelectedClipId, ctx.IsPlaying,
             Round(project.OutputDuration), source is null ? [] : Clips(project), ctx.AnalysisStatus,
             source is null ? null : StatusText(ctx.TranscriptStatus));
     }
+
+    private static AudioTrackInfo TrackInfo(int number, AudioTrack track, TrackMix mix) =>
+        new(number, track.Label, mix.GainDb, mix.IsMuted);
 
     private static List<ClipInfo> Clips(Project project) =>
         [.. project.Clips.Select((c, i) => new ClipInfo(c.Id, i + 1, c.Label, Round(c.Start), Round(c.End), Round(c.Duration), c.IsIncluded,
