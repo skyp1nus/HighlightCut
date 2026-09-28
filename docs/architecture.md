@@ -81,8 +81,8 @@ keyframes are handed to the editing session for snapping. How long each part too
 is in Copy diagnostics ("Analysis keyframes 0.2 s · thumbnails 0.3 s · …").
 
 Keyframes (needed for lossless cuts) and the waveform are always read. Thumbnails are made only while the timeline's
-Frames chip is on (off at first: the player shows the picture anyway, and a 10-minute 1080p file opens in about 1.4 s
-instead of 2.1 s without them). The editor asks for them as it loads the file (`MediaPreview.ExtractThumbnails`), so
+Frames chip is on (off at first: the player shows the picture anyway, and without them a 10-minute 1080p file opens in
+about 1.4 s instead of 2.1 s). The editor asks for them as it loads the file (`MediaPreview.ExtractThumbnails`), so
 they are then part of opening it: the processing screen and its progress include "Making thumbnails". Turned on later,
 the open file's are made in the background (status bar: "making thumbnails 40%"), or read from the cache at once.
 Turned off, a run under way stops (`StopThumbnails`) and keeps nothing of it, nothing cached; a finished set is kept
