@@ -78,6 +78,8 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
+          # Outside the checkout, on a short path.
+          Set-Location (New-Item -ItemType Directory -Force -Path "$env:RUNNER_TEMP/sherpa")
           git -c advice.detachedHead=false clone --depth 1 --branch "v$env:SHERPA_ONNX_VERSION" https://github.com/k2-fsa/sherpa-onnx.git src
           if ($LASTEXITCODE) { throw 'clone failed' }
 
@@ -119,6 +121,8 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
+          $out = New-Item -ItemType Directory -Force -Path out
+          Set-Location "$env:RUNNER_TEMP/sherpa"
           $dumpbin = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -find 'VC\Tools\MSVC\**\bin\Hostx64\x64\dumpbin.exe' | Select-Object -First 1
           function Exports([string]$dll) {
             & $dumpbin /nologo /exports $dll | ForEach-Object { if ($_ -match '^\s+\d+\s+[0-9A-F]+\s+[0-9A-F]{8}\s+(\S+)') { $Matches[1] } }
@@ -163,8 +167,7 @@ jobs:
             "Options: BUILD_SHARED_LIBS=ON SHERPA_ONNX_ENABLE_DIRECTML=ON, static CRT, no programs or examples"
           ) | Set-Content pkg/BUILD-INFO.txt
 
-          New-Item -ItemType Directory -Force -Path out | Out-Null
-          Compress-Archive -Path pkg/* -DestinationPath "out/${{ steps.names.outputs.asset }}" -CompressionLevel Optimal
+          Compress-Archive -Path pkg/* -DestinationPath "$out/${{ steps.names.outputs.asset }}" -CompressionLevel Optimal
 
       - name: Show the result
         shell: pwsh
