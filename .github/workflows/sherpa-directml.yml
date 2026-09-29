@@ -1,0 +1,215 @@
+name: sherpa-onnx DirectML
+
+# sherpa-onnx has no prebuilt DirectML release, so this builds one for win-x64: the same sherpa-onnx version as the
+# org.k2fsa.sherpa.onnx NuGet package (its C# API calls this C API), against the DirectML build of ONNX Runtime.
+# The result is published once as a release asset of this repo, which scripts/fetch-deps.ps1 downloads (deps.json pins
+# its SHA-256). A release that already exists is never rebuilt or replaced; to change the build, change the options
+# below and bump REVISION, then pin the new asset in deps.json.
+#
+# Runs when this file changes (on any branch, so a change can be tried before it reaches master) or by hand.
+
+on:
+  push:
+    branches: [master, 'claude/**']
+    paths: ['.github/workflows/sherpa-directml.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sherpa-directml
+  cancel-in-progress: false
+
+env:
+  # Must match org.k2fsa.sherpa.onnx in Directory.Packages.props.
+  SHERPA_ONNX_VERSION: '1.13.8'
+  # The newest DirectML build of ONNX Runtime (Microsoft.ML.OnnxRuntime.DirectML) and the DirectML it was released with.
+  # sherpa-onnx's own DirectML option still points at ONNX Runtime 1.14.1 from 2023; these replace it.
+  ORT_VERSION: '1.24.4'
+  ORT_SHA256: '57e9f11b73437bef7a309496135d4c1f96b1a8e9ddba60013fa27bfc1d788681'
+  DIRECTML_VERSION: '1.15.4'
+  DIRECTML_SHA256: '4e7cb7ddce8cf837a7a75dc029209b520ca0101470fcdf275c1f49736a3615b9'
+  # Bump for any change to how it is built; it names the release and the asset.
+  REVISION: '1'
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 120
+    outputs:
+      tag: ${{ steps.names.outputs.tag }}
+      asset: ${{ steps.names.outputs.asset }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Names
+        id: names
+        shell: bash
+        run: |
+          echo "tag=sherpa-onnx-v${SHERPA_ONNX_VERSION}-directml.${REVISION}" >> "$GITHUB_OUTPUT"
+          echo "asset=sherpa-onnx-v${SHERPA_ONNX_VERSION}-directml.${REVISION}-win-x64.zip" >> "$GITHUB_OUTPUT"
+
+      # Keyed on the versions and this file (the build options), so an unchanged build is not repeated.
+      - name: Cache the build
+        id: cache
+        uses: actions/cache@v4
+        with:
+          path: out
+          key: sherpa-onnx-directml-${{ env.SHERPA_ONNX_VERSION }}-ort${{ env.ORT_VERSION }}-dml${{ env.DIRECTML_VERSION }}-r${{ env.REVISION }}-${{ hashFiles('.github/workflows/sherpa-directml.yml') }}
+
+      # Once published, the release is what deps.json pins: take it rather than build a different binary.
+      - name: Take the published release
+        id: published
+        if: steps.cache.outputs.cache-hit != 'true'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release download "${{ steps.names.outputs.tag }}" --repo "$GITHUB_REPOSITORY" \
+               --pattern "${{ steps.names.outputs.asset }}" --dir out 2>/dev/null; then
+            echo "found=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "found=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build sherpa-onnx with DirectML
+        if: steps.cache.outputs.cache-hit != 'true' && steps.published.outputs.found != 'true'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          git -c advice.detachedHead=false clone --depth 1 --branch "v$env:SHERPA_ONNX_VERSION" https://github.com/k2-fsa/sherpa-onnx.git src
+          if ($LASTEXITCODE) { throw 'clone failed' }
+
+          # Point sherpa-onnx's DirectML option at the newer ONNX Runtime and DirectML packages (same layout).
+          $cmake = 'src/cmake/onnxruntime-win-x64-directml.cmake'
+          $text = Get-Content -Raw $cmake
+          $replace = [ordered]@{
+            'https://globalcdn.nuget.org/packages/microsoft.ml.onnxruntime.directml.1.14.1.nupkg' = "https://api.nuget.org/v3-flatcontainer/microsoft.ml.onnxruntime.directml/$env:ORT_VERSION/microsoft.ml.onnxruntime.directml.$env:ORT_VERSION.nupkg"
+            'c8ae7623385b19cd5de968d0df5383e13b97d1b3a6771c9177eac15b56013a5a' = $env:ORT_SHA256
+            'microsoft.ml.onnxruntime.directml.1.14.1.nupkg' = "microsoft.ml.onnxruntime.directml.$env:ORT_VERSION.nupkg"
+            'https://www.nuget.org/api/v2/package/Microsoft.AI.DirectML/1.15.0' = "https://api.nuget.org/v3-flatcontainer/microsoft.ai.directml/$env:DIRECTML_VERSION/microsoft.ai.directml.$env:DIRECTML_VERSION.nupkg"
+            '10d175f8e97447712b3680e3ac020bbb8eafdf651332b48f09ffee2eec801c23' = $env:DIRECTML_SHA256
+            'Microsoft.AI.DirectML.1.15.0.nupkg' = "Microsoft.AI.DirectML.$env:DIRECTML_VERSION.nupkg"
+          }
+          foreach ($old in $replace.Keys) {
+            if (-not $text.Contains($old)) { throw "$cmake no longer contains '$old'; update this workflow." }
+            $text = $text.Replace($old, $replace[$old])
+          }
+          if ($text -match '1\.14\.1|1\.15\.0') { throw "$cmake still names the old versions." }
+          Set-Content -NoNewline -LiteralPath $cmake -Value $text
+
+          # The options of sherpa-onnx's own .NET build (so the C API is the same), without the programs and examples.
+          cmake -S src -B build -A x64 `
+            -DCMAKE_BUILD_TYPE=Release `
+            -DCMAKE_INSTALL_PREFIX="$PWD/install" `
+            -DBUILD_SHARED_LIBS=ON `
+            -DSHERPA_ONNX_ENABLE_DIRECTML=ON `
+            -DSHERPA_ONNX_ENABLE_WEBSOCKET=OFF `
+            -DSHERPA_ONNX_ENABLE_PORTAUDIO=OFF `
+            -DSHERPA_ONNX_ENABLE_BINARY=OFF `
+            -DSHERPA_ONNX_BUILD_C_API_EXAMPLES=OFF `
+            -DBUILD_ESPEAK_NG_EXE=OFF
+          if ($LASTEXITCODE) { throw 'cmake configure failed' }
+          cmake --build build --config Release --target install -- -m
+          if ($LASTEXITCODE) { throw 'cmake build failed' }
+
+      - name: Check and package
+        if: steps.cache.outputs.cache-hit != 'true' && steps.published.outputs.found != 'true'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $dumpbin = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -find 'VC\Tools\MSVC\**\bin\Hostx64\x64\dumpbin.exe' | Select-Object -First 1
+          function Exports([string]$dll) {
+            & $dumpbin /nologo /exports $dll | ForEach-Object { if ($_ -match '^\s+\d+\s+[0-9A-F]+\s+[0-9A-F]{8}\s+(\S+)') { $Matches[1] } }
+          }
+          function Imports([string]$dll) {
+            & $dumpbin /nologo /dependents $dll | ForEach-Object { if ($_ -match '^\s+(\S+\.dll)\s*$') { $Matches[1] } }
+          }
+
+          $pkg = New-Item -ItemType Directory -Force -Path pkg
+          foreach ($f in 'sherpa-onnx-c-api.dll', 'onnxruntime.dll', 'DirectML.dll') {
+            Copy-Item -LiteralPath "install/lib/$f" -Destination $pkg
+          }
+          $licenses = New-Item -ItemType Directory -Force -Path pkg/licenses
+          Copy-Item src/LICENSE "$licenses/sherpa-onnx-LICENSE.txt"
+          Copy-Item build/_deps/onnxruntime-src/LICENSE "$licenses/onnxruntime-LICENSE.txt"
+          Copy-Item build/_deps/onnxruntime-src/ThirdPartyNotices.txt "$licenses/onnxruntime-ThirdPartyNotices.txt"
+          Copy-Item build/_deps/directml-src/LICENSE.txt "$licenses/DirectML-LICENSE.txt"
+          Copy-Item build/_deps/directml-src/ThirdPartyNotices.txt "$licenses/DirectML-ThirdPartyNotices.txt"
+
+          # The C API needs only ONNX Runtime and Windows; anything else would have to be shipped too.
+          $imports = Imports pkg/sherpa-onnx-c-api.dll
+          Write-Host "sherpa-onnx-c-api.dll imports: $($imports -join ', ')"
+          foreach ($i in $imports) {
+            if ($i -ne 'onnxruntime.dll' -and -not (Test-Path "$env:SystemRoot\System32\$i")) { throw "sherpa-onnx-c-api.dll needs $i, which is not packaged." }
+          }
+          if ($imports -notcontains 'onnxruntime.dll') { throw 'sherpa-onnx-c-api.dll does not import onnxruntime.dll.' }
+          if ((Exports pkg/onnxruntime.dll) -notcontains 'OrtSessionOptionsAppendExecutionProvider_DML') { throw 'onnxruntime.dll has no DirectML provider.' }
+
+          # A drop-in for the NuGet runtime package: every function its C API has, this one has too.
+          $nuget = "https://api.nuget.org/v3-flatcontainer/org.k2fsa.sherpa.onnx.runtime.win-x64/$env:SHERPA_ONNX_VERSION/org.k2fsa.sherpa.onnx.runtime.win-x64.$env:SHERPA_ONNX_VERSION.nupkg"
+          Invoke-WebRequest $nuget -OutFile runtime.zip
+          Expand-Archive runtime.zip -DestinationPath runtime
+          $ours = Exports pkg/sherpa-onnx-c-api.dll
+          $missing = @(Exports runtime/runtimes/win-x64/native/sherpa-onnx-c-api.dll | Where-Object { $ours -notcontains $_ })
+          Write-Host "sherpa-onnx-c-api.dll exports $($ours.Count) functions"
+          if ($missing.Count) { throw "Missing from the DirectML build's C API: $($missing -join ', ')" }
+
+          $commit = git -C src rev-parse HEAD
+          @(
+            "sherpa-onnx v$env:SHERPA_ONNX_VERSION ($commit) with DirectML, win-x64, built by $env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID"
+            "ONNX Runtime $env:ORT_VERSION (Microsoft.ML.OnnxRuntime.DirectML), DirectML $env:DIRECTML_VERSION (Microsoft.AI.DirectML)"
+            "Options: BUILD_SHARED_LIBS=ON SHERPA_ONNX_ENABLE_DIRECTML=ON, static CRT, no programs or examples"
+          ) | Set-Content pkg/BUILD-INFO.txt
+
+          New-Item -ItemType Directory -Force -Path out | Out-Null
+          Compress-Archive -Path pkg/* -DestinationPath "out/${{ steps.names.outputs.asset }}" -CompressionLevel Optimal
+
+      - name: Show the result
+        shell: pwsh
+        run: |
+          $zip = "out/${{ steps.names.outputs.asset }}"
+          $hash = (Get-FileHash -Algorithm SHA256 $zip).Hash.ToLowerInvariant()
+          $size = (Get-Item $zip).Length
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $entries = [System.IO.Compression.ZipFile]::OpenRead((Resolve-Path $zip)).Entries
+          $lines = @("### ${{ steps.names.outputs.asset }}", '', "SHA-256 ``$hash``, $size bytes", '', '| file | SHA-256 |', '| --- | --- |')
+          foreach ($e in $entries) {
+            $s = $e.Open(); $sha = [System.Security.Cryptography.SHA256]::Create()
+            $h = ([BitConverter]::ToString($sha.ComputeHash($s)) -replace '-', '').ToLowerInvariant(); $s.Dispose()
+            $lines += "| $($e.FullName) | ``$h`` |"
+          }
+          $lines | Out-File -Append -Encoding utf8 $env:GITHUB_STEP_SUMMARY
+          $lines | Write-Host
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sherpa-onnx-directml-win-x64
+          path: out/${{ steps.names.outputs.asset }}
+          if-no-files-found: error
+
+  # The first build of a revision becomes its release; later runs (master after the merge included) find it and stop.
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: sherpa-onnx-directml-win-x64
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.build.outputs.tag }}
+          ASSET: ${{ needs.build.outputs.asset }}
+        run: |
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            echo "$TAG is already published; it is not replaced."
+            exit 0
+          fi
+          gh release create "$TAG" "$ASSET" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --prerelease --latest=false \
+            --title "sherpa-onnx v${SHERPA_ONNX_VERSION} with DirectML (win-x64), build ${REVISION}" \
+            --notes "Native runtime for HighlightCut's GPU transcription on Windows, downloaded by scripts/fetch-deps.ps1. sherpa-onnx v${SHERPA_ONNX_VERSION} (Apache-2.0) built with SHERPA_ONNX_ENABLE_DIRECTML against ONNX Runtime ${ORT_VERSION} (MIT) and DirectML ${DIRECTML_VERSION} (Microsoft DirectML license, redistributable). Built by .github/workflows/sherpa-directml.yml; see BUILD-INFO.txt inside."
