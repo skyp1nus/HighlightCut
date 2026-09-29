@@ -19,12 +19,14 @@ using HighlightCut.Transcription;
 namespace HighlightCut.App.Services;
 
 /// <summary>
-/// Preview of a real media file. Keyframes and the waveform are read from the cache or extracted with ffmpeg/ffprobe
-/// in the background, both at once, and appear on the timeline as they arrive; the editor is usable immediately.
-/// Silences come from the waveform. Thumbnails are made alongside only when the timeline shows them
-/// (<see cref="ExtractThumbnails"/>, the Frames chip). Scene detection and transcription go through the whole video, so
-/// they run only when asked for (<see cref="DetectScenes"/>, <see cref="StartTranscription"/>); what an earlier run
-/// cached is shown straight away. How long each part took is kept for Copy diagnostics.
+/// Preview of a real media file. Opening it reads nothing but the probe: the player starts at once. Every part of the
+/// analysis runs only when something asks for it, in the background, from the cache or with ffmpeg/ffprobe, and appears
+/// on the timeline as it arrives: keyframes (<see cref="ScanKeyframes"/>, the Keyframes chip, or
+/// <see cref="ReadKeyframesAsync"/> for a lossless export), the audio waveform (<see cref="ReadWaveform"/>, the Waveform
+/// and Silence chips, or <see cref="ReadWaveformAsync"/> to even out volumes or find silences for Claude), thumbnails
+/// (<see cref="ExtractThumbnails"/>, the Frames chip), scene changes (<see cref="DetectScenes"/>) and the transcript
+/// (<see cref="StartTranscription"/>). Scene changes an earlier run cached are shown straight away. How long each part
+/// took is kept for Copy diagnostics.
 /// </summary>
 public sealed class MediaPreview : IMediaPreview, IDisposable
 {
@@ -40,12 +42,13 @@ public sealed class MediaPreview : IMediaPreview, IDisposable
     private readonly MediaCache? _cache;
     private readonly List<Thumbnail> _thumbnails = [];
     private readonly Lock _lock = new();
-    private readonly TaskCompletionSource<IReadOnlyList<double>> _keyframesReady =
-        new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly ConcurrentDictionary<string, string> _times = new();
+    private readonly OnDemandRead _keyframesRead;
+    private readonly OnDemandRead _waveformRead;
 
     private readonly int _expectedThumbnails;
     private double[] _keyframes = [];
+    private WaveformData _waveform;
     private double _keyframeProgress;
     private int _thumbnailsRequested;
     private CancellationTokenSource? _thumbnailsCts;
@@ -76,14 +79,18 @@ public sealed class MediaPreview : IMediaPreview, IDisposable
     {
         Info = info;
         _cache = cache;
-        Waveform = WaveformExtractor.Create(info);
+        _waveform = WaveformExtractor.Create(info);
         _expectedThumbnails = info.Video is null ? 0 : (int)Math.Floor(info.Duration / ThumbnailExtractor.IntervalFor(info.Duration)) + 1;
         if (info.Video is null)
             _keyframeProgress = 1;
+        _keyframesRead = new OnDemandRead(ct => Guard(() => ScanKeyframesAsync(ct)), DropKeyframes, NotifyChanged, _cts.Token);
+        _waveformRead = new OnDemandRead(ct => Guard(() => ExtractWaveformAsync(ct)), DropWaveform, NotifyChanged, _cts.Token);
     }
 
     public MediaInfo Info { get; }
-    public WaveformData Waveform { get; }
+
+    /// <summary>The audio peaks read so far; empty until something asks for them (<see cref="ReadWaveform"/>).</summary>
+    public WaveformData Waveform => Volatile.Read(ref _waveform);
     public double Duration => Info.Duration;
     public double FrameRate => Info.Video?.FrameRate ?? 0;
     public IReadOnlyList<double> Keyframes => Volatile.Read(ref _keyframes);
@@ -92,12 +99,86 @@ public sealed class MediaPreview : IMediaPreview, IDisposable
     public double AspectRatio => Info.Video?.DisplaySize is var (w, h) && w > 0 && h > 0 ? (double)w / h : 16.0 / 9.0;
     public bool IsPlaceholder => false;
 
-    /// <summary>Completes with the keyframes once they are scanned (empty if the scan failed).</summary>
-    public Task<IReadOnlyList<double>> KeyframesTask => _keyframesReady.Task;
+    // ---- Keyframes and waveform -------------------------------------------------------------
+
+    /// <summary>The keyframes are asked for (the Keyframes chip, or a feature waiting for them) or already read.</summary>
+    public bool KeyframesRequested => Info.Video is null || _keyframesRead.IsRequested || _keyframesRead.IsDone;
+
+    /// <summary>The keyframes have been scanned (or the scan failed); a file without video has none to scan.</summary>
+    public bool KeyframesComplete => Info.Video is null || _keyframesRead.IsDone;
+
+    /// <summary>Completes when the latest keyframe scan has finished, failed or been stopped; done while nobody asked.</summary>
+    public Task KeyframesTask => _keyframesRead.Task;
 
     /// <summary>
-    /// Completes when keyframes, waveform, cached scenes and thumbnails asked for meanwhile are read, failed or cancelled.
-    /// Scene detection (<see cref="ScenesTask"/>), transcription and thumbnails asked for later run on their own.
+    /// Scans the keyframes (the Keyframes chip turned on), or reads them from the cache, unless that is done or under way.
+    /// They show as ticks and trims snap to them.
+    /// </summary>
+    public void ScanKeyframes()
+    {
+        if (Info.Video is not null && !_disposed)
+            _keyframesRead.Show();
+    }
+
+    /// <summary>
+    /// The Keyframes chip turned off: an unfinished scan stops and nothing of it is kept, unless something (a lossless
+    /// export) is waiting for it. Keyframes already found stay.
+    /// </summary>
+    public void StopKeyframes() => _keyframesRead.Hide();
+
+    /// <summary>
+    /// The keyframes, scanned first if nobody asked for them yet (a lossless export starts clips on them). Empty if the
+    /// file has no video or the scan failed.
+    /// </summary>
+    public async Task<IReadOnlyList<double>> ReadKeyframesAsync(CancellationToken cancellationToken)
+    {
+        if (Info.Video is not null && !_disposed)
+            await _keyframesRead.WaitAsync(cancellationToken).ConfigureAwait(false);
+        return Keyframes;
+    }
+
+    /// <summary>The waveform is asked for (the Waveform or Silence chip, or a feature waiting for it) or already read.</summary>
+    public bool WaveformRequested => Info.Audio.Length == 0 || _waveformRead.IsRequested || _waveformRead.IsDone;
+
+    /// <summary>
+    /// Reads the audio waveform (the Waveform or Silence chip turned on), or loads it from the cache, unless that is done
+    /// or under way. The audio track draws it and silences are found in it.
+    /// </summary>
+    public void ReadWaveform()
+    {
+        if (Info.Audio.Length > 0 && !_disposed)
+            _waveformRead.Show();
+    }
+
+    /// <summary>
+    /// Neither the Waveform nor the Silence chip is on: an unfinished read stops and nothing of it is kept, unless
+    /// something is waiting for it. A finished waveform stays.
+    /// </summary>
+    public void StopWaveform() => _waveformRead.Hide();
+
+    /// <summary>Completes when the latest waveform read has finished, failed or been stopped; done while nobody asked.</summary>
+    public Task WaveformTask => _waveformRead.Task;
+
+    /// <summary>Reads the whole waveform if nobody asked for it yet and waits for it (to even out volumes, to find silences).</summary>
+    public async Task ReadWaveformAsync(CancellationToken cancellationToken)
+    {
+        if (Info.Audio.Length > 0 && !_disposed)
+            await _waveformRead.WaitAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    private void DropKeyframes()
+    {
+        Volatile.Write(ref _keyframes, []);
+        Volatile.Write(ref _keyframeProgress, 0);
+    }
+
+    /// <summary>A stopped read's peaks go with a fresh, empty waveform (the stopped ffmpeg may still write to the old one).</summary>
+    private void DropWaveform() => Volatile.Write(ref _waveform, WaveformExtractor.Create(Info));
+
+    /// <summary>
+    /// Completes when the file is open: the cached scenes are read and whatever the chips asked for as it opened (keyframes,
+    /// waveform, thumbnails) is read, failed or stopped. Nothing asked for, it completes at once. Scene detection
+    /// (<see cref="ScenesTask"/>), transcription and whatever is asked for later run on their own.
     /// </summary>
     public Task Analysis { get; private set; } = Task.CompletedTask;
 
@@ -113,30 +194,44 @@ public sealed class MediaPreview : IMediaPreview, IDisposable
         }
     }
 
-    /// <summary>Analysis progress 0..1 (keyframes, waveform and thumbnails, if asked for, weigh the same).</summary>
+    /// <summary>Progress 0..1 of what was asked for as the file opened (keyframes, waveform and thumbnails weigh the same).</summary>
     public double Progress => Parts() is { Count: > 0 } parts ? parts.Average(p => p.Done) : 1;
 
-    public bool IsAnalysing => _analysing;
+    /// <summary>The file is opening and something asked for with it is still being read (the processing screen shows).</summary>
+    public bool IsAnalysing => _analysing && Parts().Any(p => p.Done < 1);
 
     public double AnalysisProgress => Progress;
 
     public string? AnalysisStage => !_analysing ? null
         : Parts().Where(p => p.Done < 1).OrderBy(p => p.Done).Select(p => p.Name).FirstOrDefault() ?? "Finishing";
 
-    /// <summary>Each part of the analysis with how far it is, 0..1.</summary>
+    /// <summary>Each part of the analysis asked for, with how far it is, 0..1.</summary>
     private List<(string Name, double Done)> Parts()
     {
         var parts = new List<(string, double)>(3);
         if (Info.Video is not null)
         {
-            parts.Add(("Finding keyframes", Volatile.Read(ref _keyframeProgress)));
+            if (KeyframesRequested)
+                parts.Add((KeyframesStage, KeyframeProgress));
             if (ThumbnailsRequested)
-                parts.Add(("Making thumbnails", ThumbnailProgress));
+                parts.Add(("Making thumbnails for the video track", ThumbnailProgress));
         }
-        if (Info.Audio.Length > 0)
-            parts.Add(("Reading the audio", Waveform.IsComplete ? 1 : (double)Waveform.Decoded / Math.Max(1, Waveform.Capacity)));
+        if (Info.Audio.Length > 0 && WaveformRequested)
+            parts.Add((WaveformStage, WaveformProgress));
         return parts;
     }
+
+    /// <summary>What the keyframe scan is for, in the processing screen and the export dialog.</summary>
+    public const string KeyframesStage = "Finding keyframes (where clips can be cut without re-encoding)";
+
+    /// <summary>What reading the waveform is for, in the processing screen.</summary>
+    public const string WaveformStage = "Reading the audio (for the waveform and silences)";
+
+    /// <summary>Keyframes scanned so far, 0..1.</summary>
+    public double KeyframeProgress => KeyframesComplete ? 1 : Volatile.Read(ref _keyframeProgress);
+
+    /// <summary>Audio read so far, 0..1.</summary>
+    private double WaveformProgress => Waveform is var w && (w.IsComplete || _waveformRead.IsDone) ? 1 : (double)w.Decoded / Math.Max(1, w.Capacity);
 
     /// <summary>Thumbnails made so far, 0..1; 1 when none are being made.</summary>
     private double ThumbnailProgress =>
@@ -154,9 +249,13 @@ public sealed class MediaPreview : IMediaPreview, IDisposable
     {
         get
         {
-            if (_analysing)
+            if (IsAnalysing)
                 return $"analysing {Math.Floor(Progress * 100):0}%";
             var parts = new List<string>(3);
+            if (_keyframesRead.IsRunning)
+                parts.Add($"finding keyframes {Math.Floor(KeyframeProgress * 100):0}%");
+            if (_waveformRead.IsRunning)
+                parts.Add($"reading the audio {Math.Floor(WaveformProgress * 100):0}%");
             if (_makingThumbnails)
                 parts.Add($"making thumbnails {Math.Floor(ThumbnailProgress * 100):0}%");
             if (_transcriptState == TranscriptState.Running)
@@ -176,7 +275,7 @@ public sealed class MediaPreview : IMediaPreview, IDisposable
 
     /// <summary>
     /// Transcribes the file with <paramref name="setup"/>'s model, or reads that transcript from the cache. It starts
-    /// once keyframes, waveform and thumbnails asked for with the file are done (scene detection may still run) and
+    /// once what was asked for as the file opened is done (scene detection may still run) and
     /// fills in piece by piece. Asking again with the same model and language changes nothing; another model or
     /// language starts over.
     /// </summary>
@@ -296,7 +395,8 @@ public sealed class MediaPreview : IMediaPreview, IDisposable
     /// <summary>Scene changes at the default sensitivity, as far as the video has been scanned.</summary>
     public IReadOnlyList<double> SceneChanges => SceneAnalysis.Changes;
 
-    public bool SilencesComplete => Info.Audio.Length == 0 || Waveform.IsComplete || Analysis.IsCompleted;
+    /// <summary>Silence detection has seen all of the audio, or the waveform read ended (failed or stopped), or nobody asked.</summary>
+    public bool SilencesComplete => Info.Audio.Length == 0 || Waveform.IsComplete || !_waveformRead.IsRunning;
 
     public bool ScenesComplete => Info.Video is null || Volatile.Read(ref _scenes) is { IsComplete: true } || ScenesTask.IsCompleted;
 
@@ -420,11 +520,13 @@ public sealed class MediaPreview : IMediaPreview, IDisposable
         {
             if (Info.Audio.Length == 0)
                 return HighlightCut.Media.Analysis.SilenceAnalysis.None;
-            int filled = Waveform.Filled;
-            bool complete = Waveform.IsComplete;
+            // Read once: a stopped read replaces the waveform.
+            var waveform = Waveform;
+            int filled = waveform.Filled;
+            bool complete = waveform.IsComplete;
             if (_silences is { } cached && cached.Filled == filled && cached.Complete == complete)
                 return cached.Result;
-            var result = SilenceDetector.Find(Waveform);
+            var result = SilenceDetector.Find(waveform);
             _silences = (filled, complete, result);
             return result;
         }
@@ -457,7 +559,7 @@ public sealed class MediaPreview : IMediaPreview, IDisposable
 
     public event EventHandler? Changed;
 
-    /// <summary>Starts the background analysis.</summary>
+    /// <summary>Opens the file: shows the scene changes an earlier run cached. Nothing else is read until asked for.</summary>
     public void Start()
     {
         if (_analysing || _disposed)
@@ -471,27 +573,25 @@ public sealed class MediaPreview : IMediaPreview, IDisposable
     {
         try
         {
-            await Task.WhenAll(
-                Guard(() => ScanKeyframesAsync(ct)),
-                Guard(() => ExtractWaveformAsync(ct)),
-                Guard(() => Task.Run(LoadCachedScenes, ct))).ConfigureAwait(false);
-            // Thumbnails asked for meanwhile (the Frames chip on when the file opens) are part of opening it; stopped, they
-            // end at once. The editor asks on the UI thread as it loads the file, so this looks once that is through.
+            await Guard(() => Task.Run(LoadCachedScenes, ct)).ConfigureAwait(false);
+            // What the chips asked for as the file opened (keyframes, waveform, thumbnails) is part of opening it; stopped,
+            // it ends at once. The editor asks on the UI thread as it loads the file, so this looks once that is through.
             await Guard(async () =>
             {
                 await Dispatcher.UIThread.InvokeAsync(() => { }, DispatcherPriority.Background, ct).GetTask().ConfigureAwait(false);
-                for (Task thumbnails; !(thumbnails = Volatile.Read(ref _thumbnailsTask)).IsCompleted;)
-                    await thumbnails.ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
+                for (Task[] pending; (pending = [.. OpeningReads().Where(t => !t.IsCompleted)]).Length > 0;)
+                    await Task.WhenAll(pending).ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
             }).ConfigureAwait(false);
         }
         finally
         {
-            _keyframesReady.TrySetResult(Keyframes);
             _analysing = false;
             _mainAnalysisDone.TrySetResult();
             NotifyChanged();
         }
     }
+
+    private IEnumerable<Task> OpeningReads() => [_keyframesRead.Task, _waveformRead.Task, Volatile.Read(ref _thumbnailsTask)];
 
     /// <summary>Scene changes found when the file was open before: shown, though nobody asked this time.</summary>
     private void LoadCachedScenes()
@@ -559,9 +659,10 @@ public sealed class MediaPreview : IMediaPreview, IDisposable
             Took("keyframes", watch);
             _cache?.SaveKeyframes(Info.Path, keyframes);
         }
+        // Stopped just now, the scan leaves nothing (it is being dropped).
+        ct.ThrowIfCancellationRequested();
         Volatile.Write(ref _keyframes, keyframes);
         Volatile.Write(ref _keyframeProgress, 1);
-        _keyframesReady.TrySetResult(keyframes);
         NotifyChanged();
     }
 
@@ -569,17 +670,18 @@ public sealed class MediaPreview : IMediaPreview, IDisposable
     {
         if (Info.Audio.Length == 0)
             return;
+        var waveform = Waveform;
         if (_cache?.LoadWaveform(Info.Path) is { } cached && cached.StreamCount == Info.Audio.Length)
         {
-            Waveform.CopyFrom(cached);
+            waveform.CopyFrom(cached);
             Cached("waveform");
             NotifyChanged();
             return;
         }
         var watch = Stopwatch.StartNew();
-        await WaveformExtractor.ExtractAsync(Info, Waveform, NotifyChanged, ct).ConfigureAwait(false);
+        await WaveformExtractor.ExtractAsync(Info, waveform, NotifyChanged, ct).ConfigureAwait(false);
         Took("waveform", watch);
-        _cache?.SaveWaveform(Info.Path, Waveform);
+        _cache?.SaveWaveform(Info.Path, waveform);
     }
 
     private async Task ExtractThumbnailsAsync(CancellationToken ct)
@@ -769,7 +871,7 @@ public sealed class MediaPreview : IMediaPreview, IDisposable
         }
         _cts.Cancel();
         // The analysis still holds the token until it notices the cancellation.
-        Task.WhenAll(Analysis, ScenesTask, Volatile.Read(ref _thumbnailsTask)).ContinueWith(_ => _cts.Dispose(), CancellationToken.None, TaskContinuationOptions.None, TaskScheduler.Default);
+        Task.WhenAll(Analysis, ScenesTask, Volatile.Read(ref _thumbnailsTask), _keyframesRead.Task, _waveformRead.Task).ContinueWith(_ => _cts.Dispose(), CancellationToken.None, TaskContinuationOptions.None, TaskScheduler.Default);
     }
 
     /// <summary>An <see cref="IProgress{T}"/> that reports on the calling thread (no UI marshalling).</summary>

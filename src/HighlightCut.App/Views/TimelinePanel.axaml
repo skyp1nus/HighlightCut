@@ -28,7 +28,7 @@
             </Button>
             <Border Width="1" Height="16" Background="#1AFFFFFF" Margin="6,0" VerticalAlignment="Center" />
             <Button Classes="chip" Classes.on="{Binding ShowFrames}" Height="24" Padding="8,0"
-                    ToolTip.Tip="Thumbnails on the video track" Command="{Binding ToggleFramesCommand}">
+                    ToolTip.Tip="Thumbnails on the video track (made from the video while this is on)" Command="{Binding ToggleFramesCommand}">
               <StackPanel Orientation="Horizontal" Spacing="6">
                 <Border Classes="swatch" ClipToBounds="True">
                   <Grid ColumnDefinitions="*,1,*">
@@ -39,14 +39,30 @@
                 <TextBlock Text="Frames" VerticalAlignment="Center" />
               </StackPanel>
             </Button>
-            <Button Classes="chip" Classes.on="{Binding ShowKeyframes}" Height="24" Padding="8,0" ToolTip.Tip="Keyframe ticks"
+            <Button Classes="chip" Classes.on="{Binding KeyframesOn}" Height="24" Padding="8,0" IsEnabled="{Binding CanToggleKeyframes}"
+                    ToolTip.Tip="{Binding KeyframesTip}" ToolTip.ShowOnDisabled="True"
                     Command="{Binding ToggleKeyframesCommand}">
               <StackPanel Orientation="Horizontal" Spacing="6">
                 <Border Classes="swatch" Background="#66FFFFFF" />
                 <TextBlock Text="Keyframes" VerticalAlignment="Center" />
               </StackPanel>
             </Button>
-            <Button Classes="chip" Classes.on="{Binding ShowSilences}" Height="24" Padding="8,0" IsEnabled="{Binding HasSilenceData}"
+            <Button Classes="chip" Classes.on="{Binding WaveformOn}" Height="24" Padding="8,0" IsEnabled="{Binding CanToggleAudio}"
+                    ToolTip.Tip="{Binding WaveformTip}" ToolTip.ShowOnDisabled="True"
+                    Command="{Binding ToggleWaveformCommand}">
+              <StackPanel Orientation="Horizontal" Spacing="6">
+                <Border Classes="swatch" ClipToBounds="True">
+                  <StackPanel Orientation="Horizontal" Spacing="1" VerticalAlignment="Center" HorizontalAlignment="Center">
+                    <Border Width="1.5" Height="4" Background="#8CFFFFFF" />
+                    <Border Width="1.5" Height="8" Background="#8CFFFFFF" />
+                    <Border Width="1.5" Height="5" Background="#8CFFFFFF" />
+                    <Border Width="1.5" Height="7" Background="#8CFFFFFF" />
+                  </StackPanel>
+                </Border>
+                <TextBlock Text="Waveform" VerticalAlignment="Center" />
+              </StackPanel>
+            </Button>
+            <Button Classes="chip" Classes.on="{Binding SilencesOn}" Height="24" Padding="8,0" IsEnabled="{Binding CanToggleAudio}"
                     ToolTip.Tip="{Binding SilenceTip}" ToolTip.ShowOnDisabled="True"
                     Command="{Binding ToggleSilencesCommand}">
               <StackPanel Orientation="Horizontal" Spacing="6">
@@ -84,7 +100,7 @@
                      TextTrimming="CharacterEllipsis" Margin="8,0" />
 
           <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
-            <Button Classes="chip on" Height="24" Padding="8,0" ToolTip.Tip="Snap trims to keyframes (hold Alt to drag freely)"
+            <Button Classes="chip on" Height="24" Padding="8,0" ToolTip.Tip="{Binding SnapTip}"
                     Command="{Binding ToggleSnapCommand}">
               <StackPanel Orientation="Horizontal" Spacing="8">
                 <CheckBox Theme="{StaticResource Switch}" Classes="small" IsChecked="{Binding SnapToKeyframes}" IsHitTestVisible="False"

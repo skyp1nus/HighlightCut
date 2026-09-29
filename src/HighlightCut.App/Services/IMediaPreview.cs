@@ -24,8 +24,48 @@ public interface IMediaPreview
     double Duration { get; }
     double FrameRate { get; }
 
-    /// <summary>Keyframe times, sorted. Empty until the file has been scanned.</summary>
+    /// <summary>Keyframe times, sorted. Empty until the file has been scanned (<see cref="ScanKeyframes"/>).</summary>
     IReadOnlyList<double> Keyframes { get; }
+
+    /// <summary>The keyframes are asked for (the Keyframes chip, or a feature waiting for them) or already scanned.</summary>
+    bool KeyframesRequested => true;
+
+    /// <summary>The keyframes have been scanned (or the scan failed).</summary>
+    bool KeyframesComplete => true;
+
+    /// <summary>
+    /// Scans the keyframes (the Keyframes chip turned on), or reads them from the cache, unless that is done or under way.
+    /// </summary>
+    void ScanKeyframes()
+    {
+    }
+
+    /// <summary>The Keyframes chip turned off: an unfinished scan stops, unless something is waiting for it.</summary>
+    void StopKeyframes()
+    {
+    }
+
+    /// <summary>The keyframes, scanned first if they are not yet (a lossless export and Claude wait for them).</summary>
+    Task<IReadOnlyList<double>> ReadKeyframesAsync(CancellationToken cancellationToken) => Task.FromResult(Keyframes);
+
+    /// <summary>The audio waveform is asked for (the Waveform or Silence chip, or a feature waiting for it) or already read.</summary>
+    bool WaveformRequested => true;
+
+    /// <summary>
+    /// Reads the audio waveform (the Waveform or Silence chip turned on), or loads it from the cache, unless that is done
+    /// or under way. Silences are found in it.
+    /// </summary>
+    void ReadWaveform()
+    {
+    }
+
+    /// <summary>Neither the Waveform nor the Silence chip is on: an unfinished read stops, unless something is waiting for it.</summary>
+    void StopWaveform()
+    {
+    }
+
+    /// <summary>Reads the whole waveform if it is not yet and waits for it (evening out volumes and Claude's silence tools do).</summary>
+    Task ReadWaveformAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 
     /// <summary>Silent source ranges (every track quiet for a second or more), sorted. Grows while the audio is analysed.</summary>
     IReadOnlyList<HighlightCut.Core.Model.TimeRange> Silences => [];
@@ -115,14 +155,15 @@ public interface IMediaPreview
     string? Activity { get; }
 
     /// <summary>
-    /// Keyframes, the waveform and thumbnails (if asked for) are still being read (the processing screen shows meanwhile).
+    /// The file is opening and what the chips asked for with it (keyframes, the waveform, thumbnails) is still being read
+    /// (the processing screen shows meanwhile). With those chips off nothing is read and this is never true.
     /// </summary>
     bool IsAnalysing => false;
 
     /// <summary>How far that reading is, 0..1.</summary>
     double AnalysisProgress => 1;
 
-    /// <summary>The part the reading waits on most, e.g. "Reading the audio"; null when it is done.</summary>
+    /// <summary>The part the reading waits on most, e.g. "Reading the audio (for the waveform and silences)"; null when it is done.</summary>
     string? AnalysisStage => null;
 
     /// <summary>
