@@ -1,0 +1,4 @@
+<Project>
+  <!-- Every project that gets sherpa-onnx's native libraries gets the DirectML build of them when it is installed. -->
+  <Import Project="build\HighlightCut.DirectML.targets" />
+</Project>

@@ -46,23 +46,30 @@ public sealed class SherpaRecognizer : ISpeechRecognizer
                 config.ModelConfig.Whisper.EnableTokenTimestamps = 0;
                 break;
         }
+        if (Plan.Provider == "directml")
+            RecognizerPlan.LoadDirectML();
         // With one thread a piece runs on the pipeline's low-priority thread; with more, ONNX Runtime starts its own.
         _recognizer = Plan.Threads > 1 ? LowPriority.LowerThreadsStartedBy(() => new OfflineRecognizer(config)) : new OfflineRecognizer(config);
     }
 
     /// <summary>
-    /// Makes the recognizer for Settings → Transcription → Device: Auto uses the GPU when its runtime is installed
-    /// and falls back to the CPU if it does not start; GPU reports why it cannot.
+    /// Makes the recognizer for Settings → Transcription → Device: Auto uses the GPU when its runtime is installed,
+    /// the DirectML check (<see cref="GpuProbe"/>, run the first time) finds it works and is faster, and it starts;
+    /// otherwise the CPU. GPU reports why it cannot.
     /// </summary>
-    public static SherpaRecognizer Create(TranscriptionModel model, string directory, string? language, TranscriptionDevice device) =>
-        RecognizerPlan.Create(device, Environment.ProcessorCount, RecognizerPlan.InstalledGpuProvider,
-            plan => new SherpaRecognizer(model, directory, language, plan));
+    public static SherpaRecognizer Create(TranscriptionModel model, string directory, string? language, TranscriptionDevice device)
+    {
+        string? gpu = RecognizerPlan.InstalledGpuProvider;
+        var check = gpu == "directml" && device != TranscriptionDevice.Cpu ? GpuProbe.Check(model, directory, language) : null;
+        return RecognizerPlan.Create(device, Environment.ProcessorCount, gpu, plan => new SherpaRecognizer(model, directory, language, plan), check);
+    }
 
     public RecognizerPlan Plan { get; }
 
     /// <summary>
-    /// Decoding keeps its state in the stream; the model's ONNX Runtime sessions may run from several threads at once.
-    /// (Whisper rewrites its decoder settings on every call, always with the same values.)
+    /// Decoding keeps its state in the stream; the model's ONNX Runtime sessions may run from several threads at once
+    /// on the CPU (DirectML plans take one piece at a time). (Whisper rewrites its decoder settings on every call,
+    /// always with the same values.)
     /// </summary>
     public int Parallelism => Plan.Parallelism;
 

@@ -70,6 +70,68 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+  # Real speech on Windows with the DirectML runtime that fetch-deps installs. The runner has no GPU, only the basic
+  # display driver, which DirectML refuses: this shows that the DirectML build loads, gives the CPU build's words when
+  # it falls back to the CPU, that Auto then stays on the CPU, and what the GPU check in a child process reports.
+  windows-transcription:
+    runs-on: windows-latest
+    env:
+      HIGHLIGHTCUT_MODELS_DIR: ${{ github.workspace }}\models
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Cache native dependency downloads
+        uses: actions/cache@v4
+        with:
+          path: deps/.cache
+          key: deps-${{ hashFiles('scripts/deps.json') }}
+
+      # The real-model tests decode the samples with ffmpeg.
+      - name: Fetch native dependencies
+        shell: pwsh
+        run: |
+          ./scripts/fetch-deps.ps1
+          Add-Content -LiteralPath $env:GITHUB_PATH -Value (Resolve-Path deps/win-x64).Path
+
+      - name: Cache the models
+        uses: actions/cache@v4
+        with:
+          path: models
+          key: models-${{ hashFiles('src/HighlightCut.Transcription/Models/ModelCatalog.cs') }}
+
+      - name: Build
+        run: dotnet build tests/HighlightCut.Transcription.Tests -c Release
+
+      - name: Download the models
+        env:
+          HIGHLIGHTCUT_NETWORK_TESTS: '1'
+        run: dotnet test tests/HighlightCut.Transcription.Tests -c Release --no-build --filter "FullyQualifiedName~RealDownloadTests"
+
+      # A skipped real-model test would mean a model or the DirectML runtime is missing.
+      - name: Transcribe with the DirectML runtime
+        shell: pwsh
+        run: |
+          dotnet test tests/HighlightCut.Transcription.Tests -c Release --no-build --filter "FullyQualifiedName~RealRecognitionTests" --logger "console;verbosity=normal" | Tee-Object -Variable log
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          if ($log -match 'Skipped ') { throw 'A real-model test was skipped.' }
+
+      - name: Check the GPU the way the app does
+        shell: pwsh
+        run: |
+          dotnet publish src/HighlightCut.App -c Release -r win-x64 --self-contained -o artifacts/probe
+          $p = Start-Process -FilePath artifacts/probe/HighlightCut.exe -Wait -PassThru -NoNewWindow `
+            -ArgumentList '--probe-gpu', 'parakeet-tdt-0.6b-v3', "`"$env:HIGHLIGHTCUT_MODELS_DIR\parakeet-tdt-0.6b-v3`"" `
+            -RedirectStandardOutput probe.txt -RedirectStandardError probe-errors.txt
+          Get-Content probe.txt, probe-errors.txt
+          if ($p.ExitCode) { throw "--probe-gpu exited with $($p.ExitCode)" }
+          # No GPU here, so the check must say why DirectML did not start, and Auto must use the CPU.
+          if (-not (Select-String -Quiet -Path probe.txt -Pattern 'Works = False, .*it did not start')) { throw 'The check did not see DirectML fall back.' }
+          if (-not (Select-String -Quiet -Path probe.txt -Pattern 'Auto uses: CPU')) { throw 'Auto did not choose the CPU.' }
+
   linux:
     runs-on: ubuntu-latest
     steps:

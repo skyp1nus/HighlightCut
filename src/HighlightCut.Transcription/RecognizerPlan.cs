@@ -5,7 +5,7 @@ namespace HighlightCut.Transcription;
 /// <summary>Where Settings → Transcription → Device asks speech to be recognized.</summary>
 public enum TranscriptionDevice
 {
-    /// <summary>The GPU when its runtime is installed and starts, otherwise the CPU.</summary>
+    /// <summary>The GPU when its runtime is installed, works and is faster, otherwise the CPU.</summary>
     Auto,
     Gpu,
     Cpu,
@@ -31,17 +31,33 @@ public sealed record RecognizerPlan(string Provider, int Parallelism, int Thread
     }
 
     /// <summary>
-    /// The plan for <paramref name="device"/>. <paramref name="gpuProvider"/> is the GPU provider whose runtime is
-    /// installed (<see cref="InstalledGpuProvider"/>), or null.
+    /// One piece at a time: a DirectML session runs one call at a time (ONNX Runtime's DirectML provider needs
+    /// sequential execution), and a second copy of the model on the GPU would only compete for it. A few threads run
+    /// what stays on the CPU.
     /// </summary>
-    /// <exception cref="InvalidOperationException">The GPU was asked for and has no runtime.</exception>
-    public static RecognizerPlan Choose(TranscriptionDevice device, int cores, string? gpuProvider) => device switch
+    public static RecognizerPlan DirectML(int cores) => new("directml", 1, Math.Clamp(cores, 1, 4));
+
+    /// <summary>
+    /// The plan for <paramref name="device"/>. <paramref name="gpuProvider"/> is the GPU provider whose runtime is
+    /// installed (<see cref="InstalledGpuProvider"/>), or null; <paramref name="check"/> is what the DirectML check
+    /// found, or null if it could not run.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The GPU was asked for and has no runtime, or DirectML does not work.</exception>
+    public static RecognizerPlan Choose(TranscriptionDevice device, int cores, string? gpuProvider, GpuCheck? check = null)
     {
-        TranscriptionDevice.Cpu => Cpu(cores),
-        _ when gpuProvider is not null => new(gpuProvider, 2, 2),
-        TranscriptionDevice.Gpu => throw new InvalidOperationException(NoGpuMessage),
-        _ => Cpu(cores),
-    };
+        if (device == TranscriptionDevice.Cpu || (gpuProvider is null && device == TranscriptionDevice.Auto))
+            return Cpu(cores);
+        if (gpuProvider is null)
+            throw new InvalidOperationException(NoGpuMessage);
+        if (gpuProvider != "directml")
+            return new(gpuProvider, 2, 2);
+        // Without a check, Auto does not risk DirectML: a failing driver can end the process.
+        if (device == TranscriptionDevice.Auto)
+            return check is { Faster: true } ? DirectML(cores) : Cpu(cores);
+        return check is { Works: false }
+            ? throw new InvalidOperationException($"DirectML does not work here: {check.Problem}. Choose Auto or CPU in Settings → Transcription.")
+            : DirectML(cores);
+    }
 
     public const string NoGpuMessage =
         "Transcription on the GPU needs a GPU runtime, and this build of HighlightCut has none. Choose Auto or CPU in Settings → Transcription.";
@@ -50,9 +66,9 @@ public sealed record RecognizerPlan(string Provider, int Parallelism, int Thread
     /// Makes the recognizer for <paramref name="device"/>. With Auto, a GPU that fails to start falls back to the
     /// CPU; with GPU, the failure is reported.
     /// </summary>
-    public static T Create<T>(TranscriptionDevice device, int cores, string? gpuProvider, Func<RecognizerPlan, T> create)
+    public static T Create<T>(TranscriptionDevice device, int cores, string? gpuProvider, Func<RecognizerPlan, T> create, GpuCheck? check = null)
     {
-        var plan = Choose(device, cores, gpuProvider);
+        var plan = Choose(device, cores, gpuProvider, check);
         if (!plan.OnGpu || device == TranscriptionDevice.Gpu)
             return create(plan);
         try
@@ -72,16 +88,34 @@ public sealed record RecognizerPlan(string Provider, int Parallelism, int Thread
 
     /// <summary>
     /// The GPU provider whose ONNX Runtime library sits beside the app ("cuda" for the CUDA build of sherpa-onnx,
-    /// "directml" for the DirectML one), or null for the CPU-only runtime HighlightCut ships with.
+    /// "directml" for the DirectML one), or null for the CPU-only runtime.
     /// </summary>
     public static string? InstalledGpuProvider { get; } = FindGpuProvider(AppContext.BaseDirectory);
 
+    /// <summary>Folders the native runtime is loaded from: beside the app, or in runtimes/&lt;rid&gt;/native (builds without a RID).</summary>
+    private static string[] NativeFolders(string appDirectory) =>
+        [appDirectory, Path.Combine(appDirectory, "runtimes", RuntimeInformation.RuntimeIdentifier, "native")];
+
     internal static string? FindGpuProvider(string appDirectory)
     {
-        string[] folders = [appDirectory, Path.Combine(appDirectory, "runtimes", RuntimeInformation.RuntimeIdentifier, "native")];
+        var folders = NativeFolders(appDirectory);
         bool Has(string file) => folders.Any(f => File.Exists(Path.Combine(f, file)));
         if (OperatingSystem.IsWindows())
             return Has("onnxruntime_providers_cuda.dll") ? "cuda" : Has("DirectML.dll") ? "directml" : null;
         return OperatingSystem.IsLinux() && Has("libonnxruntime_providers_cuda.so") ? "cuda" : null;
     }
+
+    /// <summary>
+    /// Loads the DirectML library beside the runtime before ONNX Runtime asks for it by name, so Windows' own older
+    /// copy in System32 is not the one it gets (builds without a RID keep the runtime out of the app's folder).
+    /// </summary>
+    internal static void LoadDirectML()
+    {
+        if (NativeFolders(AppContext.BaseDirectory).Select(f => Path.Combine(f, "DirectML.dll")).FirstOrDefault(File.Exists) is { } path)
+            NativeLibrary.Load(path);
+    }
+
+    /// <summary>The sizes of the installed runtime's libraries: a new runtime gets checked again.</summary>
+    internal static string GpuRuntimeStamp { get; } = string.Join(",", ((string[])["sherpa-onnx-c-api.dll", "onnxruntime.dll", "DirectML.dll"])
+        .Select(file => NativeFolders(AppContext.BaseDirectory).Select(f => new FileInfo(Path.Combine(f, file))).FirstOrDefault(i => i.Exists)?.Length ?? 0));
 }

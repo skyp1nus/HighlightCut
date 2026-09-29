@@ -263,6 +263,25 @@ public class RecognizerPlanTests
     }
 
     [Fact]
+    public void Auto_uses_DirectML_only_once_the_check_finds_it_works_and_is_faster()
+    {
+        var faster = new GpuCheck(true, 3.2);
+        // Unchecked, failed or slower: the CPU.
+        Assert.Equal(RecognizerPlan.Cpu(8), RecognizerPlan.Choose(TranscriptionDevice.Auto, 8, "directml"));
+        Assert.Equal(RecognizerPlan.Cpu(8), RecognizerPlan.Choose(TranscriptionDevice.Auto, 8, "directml", GpuCheck.NoGpu));
+        Assert.Equal(RecognizerPlan.Cpu(8), RecognizerPlan.Choose(TranscriptionDevice.Auto, 8, "directml", new GpuCheck(true, 0.7)));
+        // One piece at a time on the GPU: DirectML sessions run one call at a time.
+        Assert.Equal(new RecognizerPlan("directml", 1, 4), RecognizerPlan.Choose(TranscriptionDevice.Auto, 8, "directml", faster));
+        Assert.Equal(new RecognizerPlan("directml", 1, 2), RecognizerPlan.DirectML(2));
+
+        // GPU asked for: DirectML even when slower or unchecked; a failed check is reported instead of risking it.
+        Assert.Equal("directml", RecognizerPlan.Choose(TranscriptionDevice.Gpu, 8, "directml", new GpuCheck(true, 0.7)).Provider);
+        var e = Assert.Throws<InvalidOperationException>(() => RecognizerPlan.Choose(TranscriptionDevice.Gpu, 8, "directml", GpuCheck.NoGpu));
+        Assert.Equal("DirectML does not work here: there is no GPU it can use. Choose Auto or CPU in Settings → Transcription.", e.Message);
+        Assert.Equal("cpu", RecognizerPlan.Choose(TranscriptionDevice.Cpu, 8, "directml", faster).Provider);
+    }
+
+    [Fact]
     public void Auto_falls_back_to_the_CPU_when_the_GPU_does_not_start()
     {
         var tried = new List<string>();
@@ -299,6 +318,151 @@ public class RecognizerPlanTests
         {
             Directory.Delete(dir, recursive: true);
         }
+    }
+}
+
+public sealed class GpuProbeTests : IDisposable
+{
+    private static readonly GpuAdapter Radeon = new("AMD Radeon RX 7800 XT", 0x1002, 0x747e, "32.0.21013.1000", IsSoftware: false);
+    private readonly string _dir = Directory.CreateTempSubdirectory("highlightcut-gpu-probe").FullName;
+
+    public GpuProbeTests()
+    {
+        GpuProbe.Adapter = Radeon;
+        GpuProbe.CacheFile = Path.Combine(_dir, "gpu-check.json");
+        GpuProbe.Reset();
+    }
+
+    public void Dispose()
+    {
+        GpuProbe.Adapter = GpuAdapter.Current;
+        GpuProbe.Command = null;
+        GpuProbe.CacheFile = null;
+        GpuProbe.Reset();
+        Directory.Delete(_dir, recursive: true);
+    }
+
+    private const string Result = """{"gpuSeconds":0.5,"cpuSeconds":4,"cpuPieces":4,"gpuWords":9,"cpuWords":9,"sameWords":true}""";
+
+    /// <summary>A child that prints <paramref name="output"/> (and <paramref name="errors"/> on stderr) and counts its runs.</summary>
+    private void FakeChild(string output, string errors = "", int exitCode = 0)
+    {
+        string runs = Path.Combine(_dir, "runs.txt");
+        if (OperatingSystem.IsWindows())
+        {
+            string script = Path.Combine(_dir, "child.cmd");
+            File.WriteAllText(script, $"@echo run>>\"{runs}\"\r\n@echo {output}\r\n" + (errors.Length > 0 ? $"@echo {errors} 1>&2\r\n" : "") + $"@exit /b {exitCode}\r\n");
+            GpuProbe.Command = ("cmd.exe", ["/c", script]);
+        }
+        else
+        {
+            string script = Path.Combine(_dir, "child.sh");
+            File.WriteAllText(script, $"echo run >> '{runs}'\necho '{output}'\n" + (errors.Length > 0 ? $"echo '{errors}' >&2\n" : "") + $"exit {exitCode}\n");
+            GpuProbe.Command = ("/bin/sh", [script]);
+        }
+    }
+
+    private int Runs => File.Exists(Path.Combine(_dir, "runs.txt")) ? File.ReadAllLines(Path.Combine(_dir, "runs.txt")).Length : 0;
+
+    [Fact]
+    public void The_check_runs_once_per_GPU_and_model_and_is_remembered_between_runs()
+    {
+        FakeChild(Result);
+        Assert.Null(GpuProbe.Known(ModelCatalog.Parakeet));
+
+        var check = GpuProbe.Check(ModelCatalog.Parakeet, _dir, null);
+
+        // 4 pieces in 4 s on the CPU against one in 0.5 s on the GPU: twice as fast.
+        Assert.Equal(new GpuCheck(true, 2.0), check);
+        Assert.Equal("2.0×", check!.SpeedupText);
+        Assert.Equal(check, GpuProbe.Check(ModelCatalog.Parakeet, _dir, null));
+        Assert.Equal(1, Runs);
+        GpuProbe.Reset();
+        Assert.Equal(check, GpuProbe.Known(ModelCatalog.Parakeet));
+        // Another model, or a new driver, is checked again.
+        Assert.Null(GpuProbe.Known(ModelCatalog.Find("whisper-base.en")));
+        GpuProbe.Adapter = Radeon with { DriverVersion = "32.0.21025.1000" };
+        Assert.Null(GpuProbe.Known(ModelCatalog.Parakeet));
+    }
+
+    [Fact]
+    public void Without_a_GPU_nothing_is_run()
+    {
+        FakeChild(Result);
+        GpuProbe.Adapter = new GpuAdapter("Microsoft Basic Render Driver", 0x1414, 0x8c, "10.0.26100.1", IsSoftware: true);
+        Assert.Equal(GpuCheck.NoGpu, GpuProbe.Check(ModelCatalog.Parakeet, _dir, null));
+        GpuProbe.Adapter = null;
+        Assert.Equal(GpuCheck.NoGpu, GpuProbe.Known(null));
+        Assert.Equal(0, Runs);
+    }
+
+    [Fact]
+    public void Without_a_command_the_GPU_is_not_checked()
+    {
+        GpuProbe.Command = null;
+        Assert.Null(GpuProbe.Check(ModelCatalog.Parakeet, _dir, null));
+        // A child that cannot start is not the GPU's fault: tried again next time.
+        GpuProbe.Command = (Path.Combine(_dir, "missing.exe"), []);
+        Assert.True(GpuProbe.Check(ModelCatalog.Parakeet, _dir, null)!.Retry);
+        Assert.Null(GpuProbe.Known(ModelCatalog.Parakeet));
+    }
+
+    [Fact]
+    public void A_child_that_crashes_counts_as_DirectML_not_working()
+    {
+        FakeChild("", "access violation", exitCode: 3);
+        var check = GpuProbe.Check(ModelCatalog.Parakeet, _dir, null)!;
+        Assert.False(check.Works);
+        Assert.Equal("the check stopped (exit code 3): access violation", check.Problem);
+    }
+
+    [Fact]
+    public void DirectML_that_falls_back_to_the_CPU_does_not_work()
+    {
+        // What sherpa-onnx prints when ONNX Runtime refuses the adapter, e.g. the basic display driver.
+        string errors = @"D:\a\sherpa-onnx\sherpa-onnx\csrc\session.cc:GetSessionOptionsImpl:369 Failed to enable DirectML: "
+            + @"D:\a\_work\1\s\onnxruntime\core\providers\dml\dml_provider_factory.cc(519)\onnxruntime.dll!00007FFE2B1C3F2A: (caller: 00007FFE2B1C2E11) "
+            + "Exception(1) tid(1a2c) 887A0004 The specified device interface or feature level is not supported on this system.\r\n. Fallback to cpu";
+        var check = GpuProbe.Interpret(0, Result, errors);
+        Assert.Equal(new GpuCheck(false, Problem: "it did not start (The specified device interface or feature level is not supported on this system)"), check);
+        Assert.False(check.Faster);
+    }
+
+    [Fact]
+    public void DirectML_that_hears_nothing_does_not_work_and_different_words_are_noted()
+    {
+        Assert.Equal("it recognized no words", GpuProbe.Interpret(0, Result.Replace("\"gpuWords\":9", "\"gpuWords\":0", StringComparison.Ordinal), "").Problem);
+        var check = GpuProbe.Interpret(0, "log line\n" + Result.Replace("true}", "false}", StringComparison.Ordinal), "");
+        Assert.True(check.Works);
+        Assert.False(check.SameWords);
+    }
+
+    [Fact]
+    public void The_sample_is_the_model_s_recordings_one_after_another()
+    {
+        string wavs = Directory.CreateDirectory(Path.Combine(_dir, "test_wavs")).FullName;
+        // 1 s of a 16 kHz 16-bit mono WAV at half scale.
+        short[] pcm = [.. Enumerable.Repeat((short)16384, 16000)];
+        using (var w = new BinaryWriter(File.Create(Path.Combine(wavs, "en.wav"))))
+        {
+            w.Write("RIFF"u8); w.Write(36 + pcm.Length * 2); w.Write("WAVE"u8);
+            w.Write("fmt "u8); w.Write(16); w.Write((short)1); w.Write((short)1); w.Write(16000); w.Write(32000); w.Write((short)2); w.Write((short)16);
+            w.Write("data"u8); w.Write(pcm.Length * 2);
+            foreach (short v in pcm)
+                w.Write(v);
+        }
+        File.WriteAllText(Path.Combine(wavs, "notes.wav"), "not a wav");
+
+        Assert.Equal(16000, GpuProbe.ReadWav(Path.Combine(wavs, "en.wav"))!.Length);
+        Assert.Null(GpuProbe.ReadWav(Path.Combine(wavs, "notes.wav")));
+        var sample = GpuProbe.Sample(_dir);
+        Assert.Equal(20 * 16000, sample.Length);
+        // The clip, a third of a second of pause, the clip again.
+        Assert.Equal(0.5f, sample[100]);
+        Assert.Equal(0f, sample[16000 + 100]);
+        Assert.Equal(0.5f, sample[16000 + 16000 / 3 + 100]);
+        // No recordings: a tone.
+        Assert.Equal(20 * 16000, GpuProbe.Sample(Path.Combine(_dir, "none")).Length);
     }
 }
 
@@ -345,6 +509,33 @@ public class RealRecognitionTests
         Assert.True(words.Zip(words.Skip(1)).All(p => p.Second.Start >= p.First.End - 1e-9), text);
         Assert.InRange(words[0].Start, 0, 1);
         Assert.InRange(words[^1].End, 5, 7);
+    }
+
+    [Fact]
+    public void Parakeet_on_DirectML_gives_the_CPU_s_words()
+    {
+        string? dir = ModelDirectory(ModelCatalog.Parakeet);
+        Assert.SkipWhen(dir is null, "Parakeet is not installed in HIGHLIGHTCUT_MODELS_DIR.");
+        Assert.SkipUnless(RecognizerPlan.InstalledGpuProvider == "directml", "The DirectML runtime is not installed (scripts/fetch-deps.ps1).");
+        float[] sample = GpuProbe.Sample(dir!);
+        int cores = Environment.ProcessorCount;
+
+        using var cpu = new SherpaRecognizer(ModelCatalog.Parakeet, dir!, plan: RecognizerPlan.Cpu(cores));
+        using var gpu = new SherpaRecognizer(ModelCatalog.Parakeet, dir!, plan: RecognizerPlan.DirectML(cores));
+        var cpuWords = cpu.Recognize(sample, 0).Select(w => w.Text).ToList();
+        var gpuWords = gpu.Recognize(sample, 0).Select(w => w.Text).ToList();
+
+        // Without a GPU DirectML can use (CI's basic display driver), sherpa-onnx runs the DirectML plan on the CPU.
+        Assert.NotEmpty(cpuWords);
+        Assert.Equal(cpuWords, gpuWords);
+        if (GpuAdapter.Current is not { IsSoftware: false })
+        {
+            // And Auto does not try it; GPU says why it cannot.
+            using var auto = SherpaRecognizer.Create(ModelCatalog.Parakeet, dir!, null, TranscriptionDevice.Auto);
+            Assert.Equal(RecognizerPlan.Cpu(cores), auto.Plan);
+            var e = Assert.Throws<InvalidOperationException>(() => SherpaRecognizer.Create(ModelCatalog.Parakeet, dir!, null, TranscriptionDevice.Gpu));
+            Assert.Contains("there is no GPU it can use", e.Message, StringComparison.Ordinal);
+        }
     }
 
     [Fact]

@@ -132,8 +132,7 @@ public sealed partial class TranscriptPanelViewModel : ViewModelBase
     /// <summary>"transcribing 34% · parakeet · GPU".</summary>
     public string StatusText => $"transcribing {Percent} · {EngineName} · {DeviceText}";
 
-    // STUB: say GPU once transcription runs on one (Settings → Transcription → Device).
-    private string DeviceText => _editor.IsDemo ? "GPU" : "CPU";
+    private string DeviceText => _editor.IsDemo || _editor.Settings.TranscribesOnGpu ? "GPU" : "CPU";
 
     /// <summary>What the timeline lane says when there is no text; null when there is (or no video).</summary>
     public string? LaneMessage => State switch

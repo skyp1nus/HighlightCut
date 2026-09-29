@@ -1,0 +1,50 @@
+<Project>
+  <!--
+    The DirectML build of sherpa-onnx (deps/win-x64/directml/, from scripts/fetch-deps.ps1) replaces the CPU-only
+    native libraries of the org.k2fsa.sherpa.onnx.runtime.win-x64 package, in every project that gets them: the same
+    file names in the same places, so deps.json and the loader find them as before. The folder's other libraries
+    (DirectML.dll, the Visual C++ runtime ONNX Runtime needs) go next to them.
+    Without the folder (or off win-x64) nothing changes and transcription stays on the CPU.
+  -->
+  <PropertyGroup>
+    <HighlightCutDirectMLDir>$([MSBuild]::NormalizeDirectory('$(MSBuildThisFileDirectory)', '..', 'deps', 'win-x64', 'directml'))</HighlightCutDirectMLDir>
+    <_HighlightCutWinX64 Condition="'$(RuntimeIdentifier)' == 'win-x64'">true</_HighlightCutWinX64>
+    <_HighlightCutWinX64 Condition="'$(RuntimeIdentifier)' == '' and $([MSBuild]::IsOSPlatform('Windows')) and '$([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture)' == 'X64'">true</_HighlightCutWinX64>
+  </PropertyGroup>
+
+  <Target Name="HighlightCutUseDirectMLSherpa"
+          AfterTargets="ResolvePackageAssets"
+          Condition="'$(_HighlightCutWinX64)' == 'true' and Exists('$(HighlightCutDirectMLDir)sherpa-onnx-c-api.dll')">
+    <ItemGroup>
+      <_HighlightCutSherpaNative Include="@(NativeCopyLocalItems)" Condition="'%(NuGetPackageId)' == 'org.k2fsa.sherpa.onnx.runtime.win-x64'" />
+      <_HighlightCutSherpaRuntimeTargets Include="@(RuntimeTargetsCopyLocalItems)" Condition="'%(NuGetPackageId)' == 'org.k2fsa.sherpa.onnx.runtime.win-x64'" />
+      <NativeCopyLocalItems Remove="@(_HighlightCutSherpaNative)" />
+      <RuntimeTargetsCopyLocalItems Remove="@(_HighlightCutSherpaRuntimeTargets)" />
+      <!-- Transforms keep the metadata (where each file goes); only the source changes. -->
+      <NativeCopyLocalItems Include="@(_HighlightCutSherpaNative->'$(HighlightCutDirectMLDir)%(Filename)%(Extension)')" />
+      <RuntimeTargetsCopyLocalItems Include="@(_HighlightCutSherpaRuntimeTargets->'$(HighlightCutDirectMLDir)%(Filename)%(Extension)')" />
+      <!-- The rest of the folder (DirectML.dll, the Visual C++ runtime) beside onnxruntime.dll, wherever that goes. -->
+      <_HighlightCutDirectMLExtra Include="$(HighlightCutDirectMLDir)*.dll"
+                                  Exclude="$(HighlightCutDirectMLDir)sherpa-onnx-c-api.dll;$(HighlightCutDirectMLDir)onnxruntime.dll"
+                                  NuGetPackageId="org.k2fsa.sherpa.onnx.runtime.win-x64" AssetType="native" RuntimeIdentifier="win-x64" CopyLocal="true" />
+    </ItemGroup>
+    <PropertyGroup>
+      <_HighlightCutOrtNative>@(_HighlightCutSherpaNative->WithMetadataValue('Filename', 'onnxruntime')->'%(DestinationSubPath)')</_HighlightCutOrtNative>
+      <_HighlightCutOrtRuntimeTargets>@(_HighlightCutSherpaRuntimeTargets->WithMetadataValue('Filename', 'onnxruntime')->'%(DestinationSubPath)')</_HighlightCutOrtRuntimeTargets>
+      <_HighlightCutSherpaVersion>@(_HighlightCutSherpaNative->WithMetadataValue('Filename', 'onnxruntime')->'%(NuGetPackageVersion)')@(_HighlightCutSherpaRuntimeTargets->WithMetadataValue('Filename', 'onnxruntime')->'%(NuGetPackageVersion)')</_HighlightCutSherpaVersion>
+    </PropertyGroup>
+    <ItemGroup>
+      <NativeCopyLocalItems Include="@(_HighlightCutDirectMLExtra)" Condition="'$(_HighlightCutOrtNative)' != ''"
+                            NuGetPackageVersion="$(_HighlightCutSherpaVersion)"
+                            DestinationSubDirectory="$(_HighlightCutOrtNative.Replace('onnxruntime.dll', ''))"
+                            DestinationSubPath="$([System.String]::Copy('$(_HighlightCutOrtNative)').Replace('onnxruntime.dll', '%(Filename)%(Extension)'))" />
+      <RuntimeTargetsCopyLocalItems Include="@(_HighlightCutDirectMLExtra)" Condition="'$(_HighlightCutOrtRuntimeTargets)' != ''"
+                                    NuGetPackageVersion="$(_HighlightCutSherpaVersion)"
+                                    DestinationSubDirectory="$(_HighlightCutOrtRuntimeTargets.Replace('onnxruntime.dll', ''))"
+                                    DestinationSubPath="$([System.String]::Copy('$(_HighlightCutOrtRuntimeTargets)').Replace('onnxruntime.dll', '%(Filename)%(Extension)'))" />
+      <_HighlightCutDirectMLFiles Include="@(_HighlightCutSherpaNative->'$(HighlightCutDirectMLDir)%(Filename)%(Extension)');@(_HighlightCutSherpaRuntimeTargets->'$(HighlightCutDirectMLDir)%(Filename)%(Extension)')" />
+    </ItemGroup>
+    <Error Condition="'@(_HighlightCutDirectMLFiles)' != '' and !Exists('%(_HighlightCutDirectMLFiles.Identity)')" Code="HIGHLIGHTCUT002"
+           Text="%(_HighlightCutDirectMLFiles.Identity) is missing. Run: pwsh scripts/fetch-deps.ps1 -Component sherpa-onnx-directml -Force" />
+  </Target>
+</Project>
