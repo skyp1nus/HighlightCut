@@ -205,8 +205,9 @@ public static partial class GpuProbe
         return new GpuCheck(true, result.CpuSeconds / (result.CpuPieces * result.GpuSeconds), SameWords: result.SameWords);
     }
 
-    // "…session.cc:Run:369 Failed to enable DirectML: <message>. Fallback to cpu"
-    [GeneratedRegex(@"Failed to enable DirectML: (?<why>.*?)\.? Fallback to cpu", RegexOptions.Singleline)]
+    // "…session.cc:GetSessionOptionsImpl:369 Failed to enable DirectML: <message>. Fallback to cpu", or another
+    // reason sherpa-onnx gives before "Fallback to cpu" ("DirectML is for Windows only").
+    [GeneratedRegex(@"(?:Failed to enable DirectML: (?<why>.*?)|:\d+ (?<why>[^\r\n:]*?))\.? Fallback to cpu", RegexOptions.Singleline)]
     private static partial Regex FallbackLine();
 
     // ONNX Runtime's errors carry file names and addresses; the Windows message after the HRESULT is what says why.
@@ -273,7 +274,7 @@ public static partial class GpuProbe
     }
 
     /// <summary>
-    /// About 20 s of the model's own recorded samples (test_wavs, 16 kHz 16-bit mono WAV) one after another, or of a
+    /// About 20 s of the model's own recorded samples (test_wavs) one after another, or of a
     /// tone when there are none: a piece as long as transcription gives the recognizer.
     /// </summary>
     internal static float[] Sample(string directory)
@@ -302,7 +303,10 @@ public static partial class GpuProbe
         return sample;
     }
 
-    /// <summary>The samples of a 16 kHz 16-bit PCM mono WAV file, or null for any other file.</summary>
+    /// <summary>
+    /// The samples of a 16-bit PCM WAV file, mixed to mono and resampled to 16 kHz (the models' own samples are
+    /// 16, 22.05 or 24 kHz), or null for any other file.
+    /// </summary>
     internal static float[]? ReadWav(string path)
     {
         try
@@ -313,7 +317,7 @@ public static partial class GpuProbe
             reader.ReadInt32();
             if (new string(reader.ReadChars(4)) != "WAVE")
                 return null;
-            bool pcm16Mono = false;
+            int channels = 0, rate = 0;
             while (reader.BaseStream.Position + 8 <= reader.BaseStream.Length)
             {
                 string chunk = new(reader.ReadChars(4));
@@ -321,21 +325,28 @@ public static partial class GpuProbe
                 long next = reader.BaseStream.Position + size + (size & 1);
                 if (chunk == "fmt ")
                 {
-                    short format = reader.ReadInt16(), channels = reader.ReadInt16();
-                    int rate = reader.ReadInt32();
+                    short format = reader.ReadInt16();
+                    channels = reader.ReadInt16();
+                    rate = reader.ReadInt32();
                     reader.ReadInt32();
                     reader.ReadInt16();
-                    short bits = reader.ReadInt16();
-                    pcm16Mono = format == 1 && channels == 1 && rate == TranscriptionPipeline.SampleRate && bits == 16;
+                    if (format != 1 || reader.ReadInt16() != 16 || channels < 1 || rate < 1000)
+                        return null;
                 }
                 else if (chunk == "data")
                 {
-                    if (!pcm16Mono)
+                    if (channels == 0)
                         return null;
-                    var samples = new float[Math.Min(size, (int)(reader.BaseStream.Length - reader.BaseStream.Position)) / 2];
-                    for (int i = 0; i < samples.Length; i++)
-                        samples[i] = reader.ReadInt16() / 32768f;
-                    return samples;
+                    int frames = (int)Math.Min(size, reader.BaseStream.Length - reader.BaseStream.Position) / 2 / channels;
+                    var mono = new float[frames];
+                    for (int i = 0; i < frames; i++)
+                    {
+                        float sum = 0;
+                        for (int c = 0; c < channels; c++)
+                            sum += reader.ReadInt16() / 32768f;
+                        mono[i] = sum / channels;
+                    }
+                    return Resample(mono, rate);
                 }
                 reader.BaseStream.Position = next;
             }
@@ -344,6 +355,23 @@ public static partial class GpuProbe
         {
         }
         return null;
+    }
+
+    /// <summary>Linear interpolation to 16 kHz: plenty for a speed test.</summary>
+    private static float[] Resample(float[] samples, int rate)
+    {
+        if (rate == TranscriptionPipeline.SampleRate || samples.Length == 0)
+            return samples;
+        var output = new float[(int)((long)samples.Length * TranscriptionPipeline.SampleRate / rate)];
+        double step = (double)rate / TranscriptionPipeline.SampleRate;
+        for (int i = 0; i < output.Length; i++)
+        {
+            double at = i * step;
+            int j = Math.Min((int)at, samples.Length - 1);
+            float next = samples[Math.Min(j + 1, samples.Length - 1)];
+            output[i] = (float)(samples[j] + (next - samples[j]) * (at - j));
+        }
+        return output;
     }
 }
 

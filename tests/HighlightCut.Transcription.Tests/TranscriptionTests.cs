@@ -426,6 +426,8 @@ public sealed class GpuProbeTests : IDisposable
         var check = GpuProbe.Interpret(0, Result, errors);
         Assert.Equal(new GpuCheck(false, Problem: "it did not start (The specified device interface or feature level is not supported on this system)"), check);
         Assert.False(check.Faster);
+        Assert.Equal("it did not start (DirectML is for Windows only)",
+            GpuProbe.Interpret(0, Result, "/workspace/sherpa-onnx/csrc/session.cc:GetSessionOptionsImpl:373 DirectML is for Windows only. Fallback to cpu!\n").Problem);
     }
 
     [Fact]
@@ -441,18 +443,27 @@ public sealed class GpuProbeTests : IDisposable
     public void The_sample_is_the_model_s_recordings_one_after_another()
     {
         string wavs = Directory.CreateDirectory(Path.Combine(_dir, "test_wavs")).FullName;
-        // 1 s of a 16 kHz 16-bit mono WAV at half scale.
-        short[] pcm = [.. Enumerable.Repeat((short)16384, 16000)];
-        using (var w = new BinaryWriter(File.Create(Path.Combine(wavs, "en.wav"))))
+        // 1 s of 16-bit WAV at half scale.
+        void Wav(string name, int rate, short channels)
         {
+            short[] pcm = [.. Enumerable.Repeat((short)16384, rate * channels)];
+            using var w = new BinaryWriter(File.Create(Path.Combine(wavs, name)));
             w.Write("RIFF"u8); w.Write(36 + pcm.Length * 2); w.Write("WAVE"u8);
-            w.Write("fmt "u8); w.Write(16); w.Write((short)1); w.Write((short)1); w.Write(16000); w.Write(32000); w.Write((short)2); w.Write((short)16);
+            w.Write("fmt "u8); w.Write(16); w.Write((short)1); w.Write(channels); w.Write(rate); w.Write(rate * channels * 2);
+            w.Write((short)(channels * 2)); w.Write((short)16);
             w.Write("data"u8); w.Write(pcm.Length * 2);
             foreach (short v in pcm)
                 w.Write(v);
         }
+        Wav("en.wav", 16000, 1);
         File.WriteAllText(Path.Combine(wavs, "notes.wav"), "not a wav");
 
+        // Other rates and stereo (the Parakeet samples are 22.05 and 24 kHz) become 16 kHz mono.
+        Wav("stereo.wav", 22050, 2);
+        var stereo = GpuProbe.ReadWav(Path.Combine(wavs, "stereo.wav"))!;
+        Assert.Equal(16000, stereo.Length);
+        Assert.All(stereo, v => Assert.Equal(0.5f, v));
+        File.Delete(Path.Combine(wavs, "stereo.wav"));
         Assert.Equal(16000, GpuProbe.ReadWav(Path.Combine(wavs, "en.wav"))!.Length);
         Assert.Null(GpuProbe.ReadWav(Path.Combine(wavs, "notes.wav")));
         var sample = GpuProbe.Sample(_dir);
@@ -509,6 +520,16 @@ public class RealRecognitionTests
         Assert.True(words.Zip(words.Skip(1)).All(p => p.Second.Start >= p.First.End - 1e-9), text);
         Assert.InRange(words[0].Start, 0, 1);
         Assert.InRange(words[^1].End, 5, 7);
+    }
+
+    [Fact]
+    public void The_GPU_check_s_sample_is_speech_the_model_recognizes()
+    {
+        string? dir = ModelDirectory(ModelCatalog.Parakeet);
+        Assert.SkipWhen(dir is null, "Parakeet is not installed in HIGHLIGHTCUT_MODELS_DIR.");
+        using var cpu = new SherpaRecognizer(ModelCatalog.Parakeet, dir!);
+        string text = string.Join(' ', cpu.Recognize(GpuProbe.Sample(dir!), 0).Select(w => w.Text));
+        Assert.Contains("country", text, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
