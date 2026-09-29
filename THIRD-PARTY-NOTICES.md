@@ -12,7 +12,7 @@ HighlightCut is licensed under GPL-3.0-or-later. It depends on the components be
 | sherpa-onnx with DirectML (`sherpa-onnx-c-api.dll`) | v1.13.8, built by `.github/workflows/sherpa-directml.yml` | Apache-2.0 | [k2-fsa/sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) |
 | ONNX Runtime DirectML (`onnxruntime.dll`) | 1.24.4, from `Microsoft.ML.OnnxRuntime.DirectML` | MIT | [microsoft/onnxruntime](https://github.com/microsoft/onnxruntime) |
 | DirectML (`DirectML.dll`) | 1.15.4, from `Microsoft.AI.DirectML` | Microsoft DirectML license (redistributable), `licenses/DirectML-LICENSE.txt` | [microsoft/DirectML](https://github.com/microsoft/DirectML) |
-| Visual C++ runtime (`msvcp140*.dll`, `vcruntime140*.dll`) | Visual Studio 2022 redistributable files | Microsoft Visual Studio license terms | [Microsoft](https://learn.microsoft.com/cpp/windows/redistributing-visual-cpp-files) |
+| Visual C++ runtime (`msvcp140*.dll`, `vcruntime140*.dll`) | 14.51, Visual Studio redistributable files | Microsoft Visual Studio license terms | [Microsoft](https://learn.microsoft.com/cpp/windows/redistributing-visual-cpp-files) |
 | 7-Zip (`7zr.exe`, build tool only, never shipped) | 26.03 | Public domain | [ip7z/7zip](https://github.com/ip7z/7zip) |
 
 This software uses code of FFmpeg (https://ffmpeg.org) licensed under the GPLv3, and its source can be
