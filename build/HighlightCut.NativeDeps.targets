@@ -1,7 +1,8 @@
 <Project>
   <!--
     Copies the native binaries downloaded by scripts/fetch-deps.ps1 (ffmpeg, ffprobe, libmpv)
-    from deps/<rid>/ into the app's output and publish folders.
+    from deps/<rid>/ into the app's output and publish folders. The DirectML build of sherpa-onnx in
+    deps/win-x64/directml/ is placed by HighlightCut.DirectML.targets instead.
     Missing binaries only produce a warning, so Core, Media and the tests still build without them.
   -->
   <PropertyGroup>
@@ -16,7 +17,7 @@
 
   <ItemGroup Condition="Exists('$(HighlightCutNativeDir)')">
     <None Include="$(HighlightCutNativeDir)**\*"
-          Exclude="$(HighlightCutNativeDir).highlightcut-deps.json"
+          Exclude="$(HighlightCutNativeDir).highlightcut-deps.json;$(HighlightCutNativeDir)directml\**"
           Link="%(RecursiveDir)%(Filename)%(Extension)"
           CopyToOutputDirectory="PreserveNewest"
           CopyToPublishDirectory="PreserveNewest"

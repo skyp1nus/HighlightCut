@@ -407,23 +407,20 @@ bind to view models and never change the project themselves.
 ### Not wired up yet
 
 Places where the UI and the setting exist but the behaviour does not are marked with a one-line `// STUB:` comment
-(`grep -rn "// STUB:" src`):
-
-- **Transcription**: the Transcript tab's status says CPU until transcription runs on a GPU.
+(`grep -rn "// STUB:" src`); there are none at the moment.
 
 ## Extension points
 - **Smart cut**: `CutMode.SmartCut` exists in the export settings; the planner rejects it for now. It becomes
   a third kind of plan (re-encode the GOP around each cut, copy the rest, concat). The dialog lists it as not
   yet available.
-- **GPU transcription**: HighlightCut ships the CPU-only sherpa-onnx runtime. The Device setting is wired through
-  (`RecognizerPlan`): with a GPU build of sherpa-onnx 1.13.8 beside the app (`onnxruntime_providers_cuda` or
-  `DirectML.dll`), Auto and GPU use it. sherpa-onnx publishes CUDA builds (NVIDIA; they need CUDA 12 or 13 and
-  cuDNN 9 installed) but no DirectML build.
+- **GPU transcription on NVIDIA**: sherpa-onnx publishes CUDA builds (they need CUDA 12 or 13 and cuDNN 9
+  installed). With one beside the app (`onnxruntime_providers_cuda`), Auto and GPU use it (`RecognizerPlan`), Auto
+  falling back to the CPU if it does not start. HighlightCut does not ship it.
 
 ## Transcription
 
 `HighlightCut.Transcription` (no UI references) turns speech into words with times, locally, with sherpa-onnx (ONNX
-Runtime, CPU; see GPU transcription above). Settings → Transcription lists the models (`ModelCatalog`), all int8 builds from the sherpa-onnx
+Runtime; on Windows the DirectML build, see GPU below). Settings → Transcription lists the models (`ModelCatalog`), all int8 builds from the sherpa-onnx
 GitHub releases (.tar.bz2): Parakeet TDT 0.6B v3 (25 European languages including Ukrainian and English; the default)
 and Whisper large-v3-turbo, small and base.en (99 languages; base.en English only).
 
@@ -434,9 +431,32 @@ and Whisper large-v3-turbo, small and base.en (99 languages; base.en English onl
   on threads below normal priority (`nice` 10 on Linux), sharing one model, and their words are handed on in order.
 - **Device** (`RecognizerPlan`, from Settings → Transcription → Device): on the CPU, every core: up to four pieces at
   once (each holds 100–200 MB), the cores shared among them (16 cores: 4 pieces × 4 threads; ONNX Runtime's own
-  threads are lowered too). Auto uses a GPU runtime when one is installed and falls back to the CPU if it does not
-  start; GPU fails with a clear message without one; CPU stays on the CPU. The setting's note says which it is
-  ("CPU · 16 threads").
+  threads are lowered too). GPU fails with a clear message without a GPU runtime; CPU stays on the CPU. The
+  setting's note says which it is ("CPU · 16 threads", "GPU (DirectML) · AMD Radeon RX 7800 XT · 3.2× faster than
+  the CPU"), and so does the status bar while transcribing.
+- **GPU** (Windows): sherpa-onnx has no DirectML release, so `.github/workflows/sherpa-directml.yml` builds sherpa-onnx
+  1.13.8 (the NuGet package's version, so its C# API matches) with `SHERPA_ONNX_ENABLE_DIRECTML` against ONNX Runtime
+  1.24.4 DirectML and DirectML 1.15.4, checks it exports every function of the NuGet C API and loads nothing
+  outside the package and Windows (it carries the Visual C++ runtime that build of ONNX Runtime needs), and publishes
+  it once as a release of this repo. `fetch-deps.ps1` installs it in `deps/win-x64/directml/`, and
+  `build/HighlightCut.DirectML.targets` (imported by `Directory.Build.targets`) puts it in place of the NuGet
+  package's CPU libraries in every project, with the same names and folders. Linux stays on the CPU.
+  - DirectML works on any DirectX 12 GPU (AMD, Intel, NVIDIA) on device 0, the adapter DXGI lists first
+    (`GpuAdapter`, normally the one the display is on). ONNX Runtime refuses the Basic Render Driver.
+  - A failing GPU driver can end the process instead of throwing, so Auto does not use DirectML before
+    `GpuProbe` has checked it: `HighlightCut.exe --probe-gpu-child` loads the model with DirectML, recognizes the
+    model's own samples (about 20 s, one piece), then the same on the CPU, four pieces at once, and prints the times
+    and whether the words match. sherpa-onnx carries on on the CPU when DirectML does not start and says so on
+    stderr, which counts as not working, as does a crash, a hang (5 minutes) or no words. The result is kept in
+    `gpu-check.json` per GPU, driver version, runtime and model, so each is checked once, the first time it
+    transcribes. Auto uses DirectML when it works and is at least as fast as the CPU; GPU uses it whenever it
+    works and otherwise says why.
+  - On DirectML one piece is recognized at a time (`RecognizerPlan.DirectML`: ONNX Runtime's DirectML provider needs
+    sequential execution and one call at a time per session), with up to four threads for what stays on the CPU.
+    DirectML computes in a different order than the CPU, so a word can come out differently now and then; the
+    check reports whether the sample's words match.
+  - `HighlightCut.exe --probe-gpu <model id> <model folder>` runs the check now (even without a GPU) and prints the
+    GPU, the result and what Auto would use; CI runs it on the Windows runner, which only has the Basic Render Driver.
 - **Words** (`WordBuilder`): the models give subword tokens (a leading space starts a word) with start times;
   punctuation joins the word before it; a word followed by a pause ends after about as long as it takes to say.
   The published Whisper models give no times, so their words get estimated ones: the speech in the piece (stretches

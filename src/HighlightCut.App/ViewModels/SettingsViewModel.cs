@@ -103,6 +103,8 @@ public sealed partial class SettingsViewModel : ViewModelBase
         var (command, args) = EditorLauncher.McpCommand();
         McpCommand = command;
         McpArgs = args;
+        // The first transcription with DirectML checks the GPU; the note then says what it found.
+        GpuProbe.Checked += (_, _) => Dispatcher.UIThread.Post(() => OnPropertyChanged(nameof(DeviceNote)));
     }
 
     /// <summary>Where settings are saved; null keeps them in memory (demo mode and tests).</summary>
@@ -225,9 +227,19 @@ public sealed partial class SettingsViewModel : ViewModelBase
     /// <summary>The GPU runtime beside the app ("cuda", "directml"), or null; tests set it.</summary>
     public string? GpuProvider { get; set; } = RecognizerPlan.InstalledGpuProvider;
 
-    /// <summary>What transcription runs on with the chosen device: "CPU · 16 threads", "GPU (CUDA) · CPU if it fails".</summary>
+    /// <summary>The GPU DirectML would use ("AMD Radeon RX 7800 XT"), or null; tests set it.</summary>
+    public string? GpuName { get; set; } = GpuAdapter.Current?.Name;
+
+    /// <summary>What the DirectML check found for a model, or null before it has run; tests set it.</summary>
+    public Func<TranscriptionModel?, GpuCheck?> GpuCheckFor { get; set; } = GpuProbe.Known;
+
+    /// <summary>
+    /// What transcription runs on with the chosen device: "CPU · 16 threads", "GPU (CUDA) · CPU if it fails",
+    /// "GPU (DirectML) · AMD Radeon RX 7800 XT · 3.2× faster than the CPU".
+    /// </summary>
     public string DeviceNote => _editor.IsDemo
         ? (Device == "CPU" ? "16 threads · ~4× slower" : "NVIDIA RTX 4070 · CUDA 12.4")
+        : GpuProvider == "directml" ? DirectMLNote
         : (DeviceChoice, GpuProvider) switch
         {
             (TranscriptionDevice.Gpu, null) => "No GPU runtime is installed · choose Auto or CPU",
@@ -235,6 +247,45 @@ public sealed partial class SettingsViewModel : ViewModelBase
             (TranscriptionDevice.Auto, _) => RecognizerPlan.Choose(DeviceChoice, Environment.ProcessorCount, GpuProvider).Description + " · CPU if it fails",
             _ => RecognizerPlan.Choose(DeviceChoice, Environment.ProcessorCount, GpuProvider).Description,
         };
+
+    /// <summary>Transcription runs on the GPU with the chosen device, as far as is known before it starts.</summary>
+    public bool TranscribesOnGpu
+    {
+        get
+        {
+            try
+            {
+                var check = GpuProvider == "directml" ? GpuCheckFor(ActiveModel) : null;
+                return RecognizerPlan.Choose(DeviceChoice, Environment.ProcessorCount, GpuProvider, check).OnGpu;
+            }
+            catch (InvalidOperationException)
+            {
+                return false;
+            }
+        }
+    }
+
+    /// <summary>With the DirectML runtime: the GPU, and what the check found for the active model.</summary>
+    private string DirectMLNote
+    {
+        get
+        {
+            string cpu = RecognizerPlan.Cpu(Environment.ProcessorCount).Description;
+            string gpu = "GPU (DirectML) · " + (GpuName ?? "no GPU found");
+            var check = GpuCheckFor(ActiveModel);
+            return (DeviceChoice, check) switch
+            {
+                (TranscriptionDevice.Cpu, _) => cpu,
+                (TranscriptionDevice.Auto, null) => gpu + " · checked when transcription starts",
+                (TranscriptionDevice.Auto, { Faster: true }) => $"{gpu} · {check.SpeedupText} faster than the CPU",
+                (TranscriptionDevice.Auto, { Works: true }) => $"{cpu} · faster than DirectML on {GpuName}",
+                (TranscriptionDevice.Auto, _) => $"{cpu} · DirectML: {check.Problem}",
+                (_, null) => gpu,
+                (_, { Works: true }) => $"{gpu} · " + (check.Faster ? $"{check.SpeedupText} faster than the CPU" : "slower than the CPU"),
+                _ => $"DirectML: {check.Problem} · choose Auto or CPU",
+            };
+        }
+    }
 
     /// <summary>The table header's "1.4 GB free on D:".</summary>
     public string DiskFreeText => _space is { } s ? FormatFree(s.Free) + " free" + (s.Drive is { } d ? " on " + d : "") : "";
@@ -572,6 +623,7 @@ public sealed partial class SettingsViewModel : ViewModelBase
 
     partial void OnModelChanged(ModelOption? value)
     {
+        OnPropertyChanged(nameof(DeviceNote));
         Save();
         RaiseTranscriptionChanged();
     }

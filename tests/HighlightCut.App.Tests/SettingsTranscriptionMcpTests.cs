@@ -317,6 +317,45 @@ public sealed class SettingsTranscriptionMcpTests : IDisposable
     }
 
     [AvaloniaFact]
+    public async Task With_DirectML_the_note_names_the_GPU_and_what_its_check_found()
+    {
+        string models = EmptyFolder("models");
+        string parakeet = Directory.CreateDirectory(Path.Combine(models, ModelCatalog.Parakeet.Id)).FullName;
+        foreach (string file in ModelCatalog.Parakeet.Files)
+            File.WriteAllText(Path.Combine(parakeet, file), "");
+        var editor = App.CreateEditor(null, new CountingOpener());
+        var settings = editor.Settings;
+        settings.ModelsFolder = models;
+        await editor.OpenMediaAsync("/videos/talk.mp4");
+        string threads = RecognizerPlan.Cpu(Environment.ProcessorCount).Description;
+        GpuCheck? check = null;
+        settings.GpuProvider = "directml";
+        settings.GpuName = "AMD Radeon RX 7800 XT";
+        settings.GpuCheckFor = model => model == ModelCatalog.Parakeet ? check : null;
+
+        settings.Device = "Auto";
+        Assert.Equal("GPU (DirectML) · AMD Radeon RX 7800 XT · checked when transcription starts", settings.DeviceNote);
+        check = new GpuCheck(true, 3.24);
+        Assert.Equal("GPU (DirectML) · AMD Radeon RX 7800 XT · 3.2× faster than the CPU", settings.DeviceNote);
+        check = new GpuCheck(true, 0.6);
+        Assert.Equal(threads + " · faster than DirectML on AMD Radeon RX 7800 XT", settings.DeviceNote);
+        check = new GpuCheck(false, Problem: "it did not start (the driver is too old)");
+        Assert.Equal(threads + " · DirectML: it did not start (the driver is too old)", settings.DeviceNote);
+
+        settings.Device = "GPU";
+        Assert.Equal("DirectML: it did not start (the driver is too old) · choose Auto or CPU", settings.DeviceNote);
+        check = new GpuCheck(true, 0.6);
+        Assert.Equal("GPU (DirectML) · AMD Radeon RX 7800 XT · slower than the CPU", settings.DeviceNote);
+        settings.Device = "CPU";
+        Assert.Equal(threads, settings.DeviceNote);
+
+        settings.Device = "Auto";
+        settings.GpuName = null;
+        check = GpuCheck.NoGpu;
+        Assert.Equal(threads + " · DirectML: there is no GPU it can use", settings.DeviceNote);
+    }
+
+    [AvaloniaFact]
     public void Leaving_the_demo_brings_back_the_catalog_models_and_the_real_disk()
     {
         var editor = App.CreateEditor(DesignScreen.Settings);

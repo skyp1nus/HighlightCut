@@ -85,6 +85,82 @@
             "sha256": "2cb843cfa9ee9586d2c863ff33454b8ce352a8a96dfe1021b492dfd237ecf8af"
           }
         ]
+      },
+      "sherpa-onnx-directml": {
+        "version": "sherpa-onnx v1.13.8 with DirectML: ONNX Runtime 1.24.4 DirectML, DirectML 1.15.4, Visual C++ runtime 14.51 (build 2 of .github/workflows/sherpa-directml.yml)",
+        "license": "Apache-2.0 (sherpa-onnx), MIT (ONNX Runtime), Microsoft DirectML license, Visual C++ redistributable",
+        "source": "https://github.com/k2-fsa/sherpa-onnx/tree/v1.13.8",
+        "comment": "GPU transcription on any DirectX 12 GPU. build/HighlightCut.DirectML.targets puts these in place of the CPU-only libraries of the org.k2fsa.sherpa.onnx.runtime.win-x64 package.",
+        "archive": {
+          "name": "sherpa-onnx-v1.13.8-directml.2-win-x64.zip",
+          "format": "zip",
+          "sha256": "c9bed9c889a621f61bf1bb6546ee5a8ae5671fdad3451e78fe5e3800cb516714",
+          "size": 18175828,
+          "urls": [
+            "https://github.com/skyp1nus/HighlightCut/releases/download/sherpa-onnx-v1.13.8-directml.2/sherpa-onnx-v1.13.8-directml.2-win-x64.zip"
+          ]
+        },
+        "files": [
+          {
+            "from": "sherpa-onnx-c-api.dll",
+            "to": "directml/sherpa-onnx-c-api.dll",
+            "sha256": "80dfddb559f20e5eeee0aba2cb4d3249d6077e4ba4c2836e4734a0ac3f6bf118"
+          },
+          {
+            "from": "onnxruntime.dll",
+            "to": "directml/onnxruntime.dll",
+            "sha256": "e7eedec6a6f26dc39dc948276a75ef6d2bee3fff944d874ceed0bbd3b97bff40"
+          },
+          {
+            "from": "DirectML.dll",
+            "to": "directml/DirectML.dll",
+            "sha256": "9c9e6d822561c6c41b90e6994b3e8857cf1d66dbfb1e0c4c799c7c89b4e92da1"
+          },
+          {
+            "from": "msvcp140.dll",
+            "to": "directml/msvcp140.dll",
+            "sha256": "7c26614e1d733892c2deac7e245ce115504b1d80592dd0a01b08e3e5a55f89ca"
+          },
+          {
+            "from": "msvcp140_1.dll",
+            "to": "directml/msvcp140_1.dll",
+            "sha256": "206c931bf90fdad8816de3b5e2ef80b2bcaa9406c89ecc05fe6fddffe251e982"
+          },
+          {
+            "from": "vcruntime140.dll",
+            "to": "directml/vcruntime140.dll",
+            "sha256": "d1f4225df2cd877dbf130d5668a021dce3f94118455ff5ec952061c30afc9ce7"
+          },
+          {
+            "from": "vcruntime140_1.dll",
+            "to": "directml/vcruntime140_1.dll",
+            "sha256": "a7146c08f89fe5b04541ab507cdb59ff7b44534d4ba3c668a426c6450a03434e"
+          },
+          {
+            "from": "licenses/sherpa-onnx-LICENSE.txt",
+            "to": "licenses/sherpa-onnx-LICENSE.txt"
+          },
+          {
+            "from": "licenses/onnxruntime-LICENSE.txt",
+            "to": "licenses/onnxruntime-LICENSE.txt"
+          },
+          {
+            "from": "licenses/onnxruntime-ThirdPartyNotices.txt",
+            "to": "licenses/onnxruntime-ThirdPartyNotices.txt"
+          },
+          {
+            "from": "licenses/DirectML-LICENSE.txt",
+            "to": "licenses/DirectML-LICENSE.txt"
+          },
+          {
+            "from": "licenses/DirectML-ThirdPartyNotices.txt",
+            "to": "licenses/DirectML-ThirdPartyNotices.txt"
+          },
+          {
+            "from": "licenses/VC-runtime-NOTICE.txt",
+            "to": "licenses/VC-runtime-NOTICE.txt"
+          }
+        ]
       }
     }
   }

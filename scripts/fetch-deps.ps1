@@ -1,7 +1,8 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-    Downloads the native binaries HighlightCut needs (ffmpeg, ffprobe, libmpv) into deps/<rid>/.
+    Downloads the native binaries HighlightCut needs (ffmpeg, ffprobe, libmpv, the DirectML build of sherpa-onnx)
+    into deps/<rid>/.
 
 .DESCRIPTION
     Versions, download URLs and SHA-256 hashes are pinned in scripts/deps.json. Every download and
@@ -16,7 +17,7 @@
     Runtime identifier to fetch for. Only win-x64 is pinned for now.
 
 .PARAMETER Component
-    Components to fetch: ffmpeg, libmpv, vulkan. Default: all components for the RID.
+    Components to fetch: ffmpeg, libmpv, vulkan, sherpa-onnx-directml. Default: all components for the RID.
 
 .PARAMETER Force
     Reinstall even when the installed files already match the manifest.

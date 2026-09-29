@@ -128,7 +128,8 @@ powershell -ExecutionPolicy Bypass -File scripts\fetch-deps.ps1   # or: pwsh scr
 dotnet run --project src/HighlightCut.App
 ```
 
-`fetch-deps.ps1` downloads ffmpeg, ffprobe and libmpv into `deps/win-x64/`. They are not stored in the
+`fetch-deps.ps1` downloads ffmpeg, ffprobe, libmpv and the DirectML build of sherpa-onnx (speech recognition on any
+DirectX 12 GPU, built by this repo's CI) into `deps/win-x64/`. They are not stored in the
 repository. The build copies them next to `HighlightCut.exe`. Versions, URLs and SHA-256 hashes are pinned in
 [`scripts/deps.json`](scripts/deps.json), and the script refuses anything that does not match.
 Useful options: `-Check` (verify only, no downloads), `-Force` (reinstall), `-Component ffmpeg`,
