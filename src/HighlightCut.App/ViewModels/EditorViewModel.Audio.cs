@@ -107,20 +107,29 @@ public sealed partial class EditorViewModel
     private bool CanEvenOutVolumes() => AudioLanes.Count(l => !l.IsMuted) >= 2;
 
     /// <summary>
-    /// Sets the volumes of the unmuted lanes so they sound about equally loud, from the waveform the analysis read
-    /// (<see cref="AudioLevels.EvenOut"/>). Muted lanes keep their volume.
+    /// Sets the volumes of the unmuted lanes so they sound about equally loud, from the audio's waveform
+    /// (<see cref="AudioLevels.EvenOut"/>), which is read first if no chip has read it. Muted lanes keep their volume.
     /// </summary>
     [RelayCommand(CanExecute = nameof(CanEvenOutVolumes))]
-    private void EvenOutVolumes()
+    private async Task EvenOutVolumesAsync()
     {
         if (Media is not { } media)
             return;
+        // Not read yet (no chip asked for it) or still being read.
+        if (!media.WaveformRequested || !media.SilencesComplete)
+        {
+            ShowMessage("Reading the audio to measure how loud each track is…");
+            await media.ReadWaveformAsync(CancellationToken.None).ConfigureAwait(true);
+            // Another file opened meanwhile (its preview's read ends when it closes): nothing to even out here.
+            if (!ReferenceEquals(Media, media))
+                return;
+        }
         var lanes = AudioLanes.Where(l => !l.IsMuted).ToList();
         var levels = lanes.Select(l => media.MeasureAudio(l.Stream)).ToList();
-        if (media.IsAnalysing || levels.Count(l => l is not null) < 2)
+        if (levels.Count(l => l is not null) < 2)
         {
-            ShowMessage(media.IsAnalysing || levels.All(l => l is null)
-                ? "The audio is still being read; try again when the waveform is complete."
+            ShowMessage(levels.All(l => l is null)
+                ? "Could not read the audio, so the volumes stay as they are."
                 : "Only one track has sound, so there is nothing to even out.");
             return;
         }

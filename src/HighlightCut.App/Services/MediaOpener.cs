@@ -16,7 +16,10 @@ public interface IMediaOpener
     Task<OpenedMedia> OpenAsync(string path, CancellationToken cancellationToken = default);
 }
 
-/// <summary>Probes the file (off the UI thread) and starts analysing it for the timeline.</summary>
+/// <summary>
+/// Probes the file (off the UI thread) and opens its preview. Nothing else is read until the timeline's chips or a
+/// feature ask for it, so the player can start at once.
+/// </summary>
 public sealed class FfmpegMediaOpener(MediaCache? cache) : IMediaOpener
 {
     public async Task<OpenedMedia> OpenAsync(string path, CancellationToken cancellationToken = default)

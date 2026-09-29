@@ -37,6 +37,18 @@ public interface IEditorContext
     /// <summary>Keyframe times of the source, sorted (empty until scanned).</summary>
     IReadOnlyList<double> Keyframes { get; }
 
+    /// <summary>
+    /// The keyframe times, scanned first if they are not yet: the editor finds them only while the user's Keyframes chip
+    /// is on. Empty if the source has no video.
+    /// </summary>
+    Task<IReadOnlyList<double>> ReadKeyframesAsync(CancellationToken cancellationToken) => Task.FromResult(Keyframes);
+
+    /// <summary>
+    /// Reads all of the source's audio if it is not yet (the editor reads it only while the user's Waveform or Silence chip
+    /// is on) and waits for it, so <see cref="FindSilences"/> then covers the whole file.
+    /// </summary>
+    Task ReadAudioAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+
     /// <summary>Stretches where every chosen audio track stays quiet; null when the video has no audio.</summary>
     /// <param name="minDuration">Shortest silence, in seconds.</param>
     /// <param name="thresholdDb">Peak level (dBFS) that counts as silent; automatic (from the noise floor) if null.</param>
@@ -95,7 +107,7 @@ public interface IEditorContext
 /// <summary>Silences found in the source's audio.</summary>
 /// <param name="ThresholdDb">Peak level (dBFS) below which audio counted as silent.</param>
 /// <param name="NoiseFloorDb">Level of the quietest 5 % of the audio: roughly the background noise.</param>
-/// <param name="IsComplete">False while the audio is still being analysed.</param>
+/// <param name="IsComplete">False while the audio is still being read, or if not all of it could be.</param>
 public sealed record SilenceReport(IReadOnlyList<TimeRange> Ranges, double ThresholdDb, double NoiseFloorDb, bool IsComplete);
 
 /// <summary>Scene changes found in the source's video.</summary>

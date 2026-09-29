@@ -31,6 +31,14 @@ public sealed class EditorMcpHost(EditorViewModel editor) : IEditorHost, IEditor
     public bool IsPlaying => editor.IsPlaying;
     public IReadOnlyList<double> Keyframes => editor.Media?.Keyframes ?? [];
 
+    /// <summary>Scans the keyframes if the Keyframes chip has not (they stay for the ticks and snapping once found).</summary>
+    public Task<IReadOnlyList<double>> ReadKeyframesAsync(CancellationToken cancellationToken) =>
+        editor.Media?.ReadKeyframesAsync(cancellationToken) ?? Task.FromResult<IReadOnlyList<double>>([]);
+
+    /// <summary>Reads the audio if neither the Waveform nor the Silence chip has.</summary>
+    public Task ReadAudioAsync(CancellationToken cancellationToken) =>
+        editor.Media?.ReadWaveformAsync(cancellationToken) ?? Task.CompletedTask;
+
     public SilenceReport? FindSilences(double minDuration, double? thresholdDb, IReadOnlyList<int>? streams) =>
         editor.Media?.FindSilences(minDuration, thresholdDb, streams) is { } found
             ? new SilenceReport(found.Ranges, found.ThresholdDb, found.NoiseFloorDb, found.IsComplete)
