@@ -27,6 +27,14 @@ internal sealed class FakeEditor : IEditorHost, IEditorContext, IDisposable
     public IReadOnlyList<double> Keyframes { get; set; } = [0, 2, 4, 9.5, 10, 12, 99, 100, 102];
     public SilenceReport? Silences { get; set; } = new([new(50, 52.5), new(120, 124), new(150, 150.8), new(330, 340)], -48, -60, true);
     public SceneReport? Scenes { get; set; } = new([20, 105.5, 180, 420], true, 1);
+
+    /// <summary>What a keyframe scan finds when <see cref="Keyframes"/> is empty (the user's Keyframes chip off).</summary>
+    public IReadOnlyList<double> ScannedKeyframes { get; set; } = [];
+    public int KeyframeScans { get; private set; }
+
+    /// <summary>The silences once all the audio is read, when <see cref="Silences"/> is not complete; null if the read fails.</summary>
+    public SilenceReport? SilencesWhenRead { get; set; }
+    public int AudioReads { get; private set; }
     public List<(double MinDuration, double? ThresholdDb, IReadOnlyList<int>? Streams)> SilenceQueries { get; } = [];
     public string? AnalysisStatus { get; set; }
     public List<string> Opened { get; } = [];
@@ -65,6 +73,26 @@ internal sealed class FakeEditor : IEditorHost, IEditorContext, IDisposable
     {
         SilenceQueries.Add((minDuration, thresholdDb, streams));
         return Silences is { } s ? s with { Ranges = [.. s.Ranges.Where(r => r.Duration >= minDuration)], ThresholdDb = thresholdDb ?? s.ThresholdDb } : null;
+    }
+
+    public Task<IReadOnlyList<double>> ReadKeyframesAsync(CancellationToken cancellationToken)
+    {
+        if (Keyframes.Count == 0)
+        {
+            KeyframeScans++;
+            Keyframes = ScannedKeyframes;
+        }
+        return Task.FromResult(Keyframes);
+    }
+
+    public Task ReadAudioAsync(CancellationToken cancellationToken)
+    {
+        if (Silences is { IsComplete: false })
+        {
+            AudioReads++;
+            Silences = SilencesWhenRead ?? Silences;
+        }
+        return Task.CompletedTask;
     }
 
     public SceneReport? FindSceneChanges(double threshold) =>
@@ -467,11 +495,23 @@ public class McpEditingTests
         Assert.Equal([9.5, 10, 12], (await c.Client.Call("find_keyframes", new { start = 5, end = 20 })).Json().EnumerateArray()
             .Select(e => e.GetDouble()));
 
+        Assert.Equal(0, editor.KeyframeScans);
+
+        // Not scanned (the user's Keyframes chip is off): the tool scans them first, once.
         editor.Keyframes = [];
-        editor.AnalysisStatus = "analysing 40%";
-        var pending = await c.Client.Call("find_keyframes", new { start = 0, end = 10 });
-        Assert.True(pending.IsError);
-        Assert.Contains("analysing 40%", pending.Text(), StringComparison.Ordinal);
+        editor.ScannedKeyframes = [0, 4.5, 9];
+        Assert.Equal([4.5, 9], (await c.Client.Call("find_keyframes", new { start = 1, end = 10 })).Json().EnumerateArray()
+            .Select(e => e.GetDouble()));
+        Assert.Equal([0, 4.5], (await c.Client.Call("find_keyframes", new { start = 0, end = 5 })).Json().EnumerateArray()
+            .Select(e => e.GetDouble()));
+        Assert.Equal(1, editor.KeyframeScans);
+
+        // A scan that finds nothing (no video, or it failed) says so.
+        editor.Keyframes = [];
+        editor.ScannedKeyframes = [];
+        var none = await c.Client.Call("find_keyframes", new { start = 0, end = 10 });
+        Assert.True(none.IsError);
+        Assert.Contains("no keyframes", none.Text(), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -756,15 +796,35 @@ public class McpAnalysisTests
     }
 
     [Fact]
-    public async Task Cut_silences_waits_for_the_audio_analysis()
+    public async Task The_silence_tools_read_the_audio_first_when_it_is_not_read()
     {
-        var editor = new FakeEditor { AnalysisStatus = "analysing 40%" };
+        var editor = new FakeEditor();
+        var complete = editor.Silences!;
+        editor.Silences = complete with { Ranges = [], IsComplete = false };
+        editor.SilencesWhenRead = complete;
+        await using var c = await Connection.OpenAsync(editor);
+
+        var found = (await c.Client.Call("find_silences")).Json();
+        Assert.True(found.GetProperty("complete").GetBoolean());
+        Assert.Equal(3, found.GetProperty("count").GetInt32());
+        Assert.Equal(1, editor.AudioReads);
+
+        editor.Silences = complete with { Ranges = [], IsComplete = false };
+        var cut = (await c.Client.Call("cut_silences")).Json();
+        Assert.Equal("Removed 1 silence: 3.7 s shorter.", cut.GetProperty("result").GetString());
+        Assert.Equal(2, editor.AudioReads);
+    }
+
+    [Fact]
+    public async Task Cut_silences_cuts_nothing_when_the_audio_could_not_all_be_read()
+    {
+        var editor = new FakeEditor { AnalysisStatus = "reading the audio 40%" };
         editor.Silences = editor.Silences! with { IsComplete = false };
         await using var c = await Connection.OpenAsync(editor);
 
         var result = await c.Client.Call("cut_silences");
         Assert.True(result.IsError);
-        Assert.Contains("analysing 40%", result.Text(), StringComparison.Ordinal);
+        Assert.Contains("reading the audio 40%", result.Text(), StringComparison.Ordinal);
         Assert.Empty(editor.Session.History.Entries);
     }
 }

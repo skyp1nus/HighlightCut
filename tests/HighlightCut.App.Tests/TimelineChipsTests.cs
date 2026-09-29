@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using Avalonia;
 using Avalonia.Headless.XUnit;
 using Avalonia.Media;
@@ -10,8 +11,9 @@ using HighlightCut.Transcription.Models;
 namespace HighlightCut.App.Tests;
 
 /// <summary>
-/// The timeline toolbar's chips: kept for every project and every run, and only what they show is worked out (thumbnails
-/// while Frames is on, scene changes while Scenes is on, a transcript while Transcript is on).
+/// The timeline toolbar's chips: kept for every project and every run, and only what they show is worked out (keyframes
+/// while Keyframes is on, the audio while Waveform or Silence is, thumbnails while Frames is, scene changes while Scenes
+/// is, a transcript while Transcript is). All of them start off, so opening a video reads nothing.
 /// </summary>
 public sealed class TimelineChipsTests : IDisposable
 {
@@ -35,24 +37,32 @@ public sealed class TimelineChipsTests : IDisposable
     public void The_chips_are_kept_for_the_next_run()
     {
         var first = Start();
-        Assert.True(first.ShowKeyframes && first.ShowSilences && first.SnapToKeyframes);
-        Assert.False(first.ShowFrames || first.ShowScenes || first.ShowTranscriptLane);
+        Assert.True(first.SnapToKeyframes);
+        Assert.False(first.ShowKeyframes || first.ShowWaveform || first.ShowSilences || first.ShowFrames || first.ShowScenes
+                     || first.ShowTranscriptLane);
         Assert.Equal("Show scene changes (finding them reads every frame, so it takes a while)", first.ScenesTip);
+        Assert.StartsWith("Show keyframes: the frames a clip can start on without re-encoding.", first.KeyframesTip, StringComparison.Ordinal);
+        Assert.Equal("Show the audio waveform (reading it goes through all the audio once)", first.WaveformTip);
+        Assert.Equal("Show pauses of a second or more (finding them reads all the audio)", first.SilenceTip);
 
         first.ToggleFramesCommand.Execute(null);
         first.ToggleKeyframesCommand.Execute(null);
+        first.ToggleWaveformCommand.Execute(null);
         first.ToggleScenesCommand.Execute(null);
         first.ToggleSnapCommand.Execute(null);
         first.ToggleTranscriptLaneCommand.Execute(null);
         Assert.Equal("Scene changes: found in every video you open", first.ScenesTip);
+        Assert.Equal("Keyframe ticks: found in every video you open; trims snap to them", first.KeyframesTip);
 
         var saved = new AppSettingsStore(SettingsFile).Load();
-        Assert.Equal(new TimelineSettings(Keyframes: false, Silences: true, Scenes: true, Snap: false, Frames: true), saved.Timeline);
+        Assert.Equal(new TimelineSettings(Keyframes: true, Silences: false, Scenes: true, Snap: false, Frames: true, Waveform: true),
+            saved.Timeline);
         Assert.True(saved.Transcription.TranscribeOnOpen);
         var second = Start();
         Assert.True(second.ShowFrames);
-        Assert.False(second.ShowKeyframes);
-        Assert.True(second.ShowSilences);
+        Assert.True(second.ShowKeyframes);
+        Assert.True(second.ShowWaveform);
+        Assert.False(second.ShowSilences);
         Assert.True(second.ScenesOn);
         Assert.False(second.SnapToKeyframes);
         Assert.True(second.ShowTranscriptLane);
@@ -159,34 +169,140 @@ public sealed class TimelineChipsTests : IDisposable
     {
         var editor = App.CreateEditor(DesignScreen.Editing, new CountingOpener());
         editor.Settings.Store = new AppSettingsStore(SettingsFile);
-        Assert.True(editor.ShowKeyframes && editor.ShowSilences && editor.ShowScenes && editor.ShowFrames && editor.SnapToKeyframes);
+        Assert.True(editor.ShowKeyframes && editor.ShowWaveform && editor.ShowSilences && editor.ShowScenes && editor.ShowFrames
+                    && editor.SnapToKeyframes);
 
         editor.ToggleKeyframesCommand.Execute(null);
         Assert.False(File.Exists(SettingsFile));
 
-        // Opening a file leaves the design: the user's own chips (here the defaults) come back.
+        // Opening a file leaves the design: the user's own chips (here the defaults, all off) come back.
         await editor.OpenMediaAsync("/videos/talk.mp4");
         Assert.False(editor.IsDemo);
-        Assert.True(editor.ShowKeyframes);
-        Assert.False(editor.ShowScenes);
-        Assert.False(editor.ShowFrames);
-        Assert.Equal(0, ((CountingOpener.Preview)editor.Media!).ThumbnailRuns);
+        Assert.False(editor.ShowKeyframes || editor.ShowWaveform || editor.ShowSilences || editor.ShowScenes || editor.ShowFrames);
+        var talk = (CountingOpener.Preview)editor.Media!;
+        Assert.Equal((0, 0, 0), (talk.KeyframeScans, talk.WaveformReads, talk.ThumbnailRuns));
         Assert.False(File.Exists(SettingsFile));
     }
 
+    [AvaloniaFact]
+    public async Task Opening_a_video_with_the_default_chips_starts_no_analysis()
+    {
+        var opener = new CountingOpener();
+        var editor = Start(opener);
+        await editor.OpenMediaAsync("/videos/talk.mp4");
+        var talk = opener.Last!;
+
+        Assert.Equal((0, 0, 0, 0, 0), (talk.KeyframeScans, talk.WaveformReads, talk.ThumbnailRuns, talk.SceneSearches, talk.Transcriptions));
+        Assert.False(editor.Processing.IsVisible);
+        Assert.Contains("Timeline chips keyframes off · waveform off · silence off · scenes off · frames off",
+            editor.Settings.DiagnosticsText(), StringComparison.Ordinal);
+    }
+
+    [AvaloniaFact]
+    public async Task Keyframes_are_scanned_only_while_the_Keyframes_chip_is_on()
+    {
+        var opener = new CountingOpener();
+        var editor = Start(opener);
+        await editor.OpenMediaAsync("/videos/talk.mp4");
+        var talk = opener.Last!;
+
+        editor.ToggleKeyframesCommand.Execute(null);
+        Assert.Equal(1, talk.KeyframeScans);
+        Assert.True(editor.KeyframesOn);
+        editor.ToggleKeyframesCommand.Execute(null);
+        Assert.Equal(1, talk.KeyframeStops);
+        await editor.OpenMediaAsync("/videos/other.mp4");
+        Assert.Equal(0, opener.Last!.KeyframeScans);
+
+        // On, every video opened after is scanned as it opens, in this run and the next.
+        editor.ToggleKeyframesCommand.Execute(null);
+        await editor.OpenMediaAsync("/videos/third.mp4");
+        Assert.Equal(1, opener.Last!.KeyframeScans);
+        var next = Start(opener);
+        await next.OpenMediaAsync("/videos/talk.mp4");
+        Assert.Equal(1, opener.Last!.KeyframeScans);
+    }
+
+    [AvaloniaFact]
+    public async Task The_audio_is_read_while_the_Waveform_or_the_Silence_chip_is_on()
+    {
+        var opener = new CountingOpener();
+        var editor = Start(opener);
+        await editor.OpenMediaAsync("/videos/talk.mp4");
+        var talk = opener.Last!;
+
+        // Silences are found in the waveform, so either chip reads it; it stops only when both are off.
+        editor.ToggleSilencesCommand.Execute(null);
+        Assert.Equal(1, talk.WaveformReads);
+        editor.ToggleWaveformCommand.Execute(null);
+        Assert.Equal(2, talk.WaveformReads);
+        editor.ToggleSilencesCommand.Execute(null);
+        Assert.Equal(0, talk.WaveformStops);
+        Assert.True(talk.WaveformRequested);
+        editor.ToggleWaveformCommand.Execute(null);
+        Assert.Equal(1, talk.WaveformStops);
+        Assert.False(talk.WaveformRequested);
+
+        editor.ToggleSilencesCommand.Execute(null);
+        await editor.OpenMediaAsync("/videos/other.mp4");
+        Assert.Equal(1, opener.Last!.WaveformReads);
+        Assert.Equal(0, opener.Last!.KeyframeScans);
+    }
+
+    [AvaloniaFact]
+    public async Task Evening_out_the_volumes_reads_the_audio_when_no_chip_has()
+    {
+        var opener = new CountingOpener(streams: 2);
+        var editor = Start(opener);
+        await editor.OpenMediaAsync("/videos/talk.mp4");
+        var talk = opener.Last!;
+
+        editor.EvenOutVolumesCommand.Execute(null);
+
+        Assert.Equal(1, talk.WaveformWaits);
+        Assert.Equal("Could not read the audio, so the volumes stay as they are.", editor.StatusMessage);
+    }
+
+    [AvaloniaFact]
+    public void A_settings_file_from_when_keyframes_and_silences_were_on_by_default_reads_as_off()
+    {
+        File.WriteAllText(SettingsFile, """{ "transcription": {}, "timeline": { "keyframes": true, "silences": true, "snap": true, "frames": true } }""");
+
+        var editor = Start();
+
+        // Read once with the new defaults; the other chips stay as they were.
+        Assert.False(editor.ShowKeyframes || editor.ShowSilences || editor.ShowWaveform);
+        Assert.True(editor.ShowFrames && editor.SnapToKeyframes);
+
+        // From then on the user's choice is kept.
+        editor.ToggleKeyframesCommand.Execute(null);
+        editor.ToggleSilencesCommand.Execute(null);
+        Assert.Contains("\"keyframeTicks\": true", File.ReadAllText(SettingsFile), StringComparison.Ordinal);
+        var next = Start();
+        Assert.True(next.ShowKeyframes && next.ShowSilences);
+        Assert.False(next.ShowWaveform);
+    }
+
     /// <summary>Opens every path as a small file that counts what is asked of it.</summary>
-    private sealed class CountingOpener : IMediaOpener
+    private sealed class CountingOpener(int streams = 1) : IMediaOpener
     {
         public Preview? Last { get; private set; }
 
         public Task<OpenedMedia> OpenAsync(string path, CancellationToken cancellationToken = default)
         {
-            Last = new Preview();
-            return Task.FromResult(new OpenedMedia(new HighlightCut.Core.Model.SourceMedia(path, 10, 25, [new(1, "Mic")]), Last, "talk.mp4"));
+            Last = new Preview(streams);
+            var tracks = Enumerable.Range(1, streams).Select(i => new HighlightCut.Core.Model.AudioTrack(i, "Mic " + i)).ToImmutableArray();
+            return Task.FromResult(new OpenedMedia(new HighlightCut.Core.Model.SourceMedia(path, 10, 25, tracks), Last, "talk.mp4"));
         }
 
-        public sealed class Preview : IMediaPreview
+        public sealed class Preview(int streams) : IMediaPreview
         {
+            public int KeyframeScans { get; private set; }
+            public int KeyframeStops { get; private set; }
+            public int WaveformReads { get; private set; }
+            public int WaveformStops { get; private set; }
+            public int WaveformWaits { get; private set; }
+            public bool WaveformRequested { get; private set; }
             public int SceneSearches { get; private set; }
             public int SceneStops { get; private set; }
             public int Transcriptions { get; private set; }
@@ -197,7 +313,7 @@ public sealed class TimelineChipsTests : IDisposable
             public double Duration => 10;
             public double FrameRate => 25;
             public IReadOnlyList<double> Keyframes => [0];
-            public int AudioStreamCount => 1;
+            public int AudioStreamCount => streams;
             public bool IsPlaceholder => false;
             public bool IsPlayable => false;
             public string? Activity => null;
@@ -210,6 +326,29 @@ public sealed class TimelineChipsTests : IDisposable
             {
                 add { }
                 remove { }
+            }
+
+            public void ScanKeyframes() => KeyframeScans++;
+
+            public void StopKeyframes() => KeyframeStops++;
+
+            public void ReadWaveform()
+            {
+                WaveformReads++;
+                WaveformRequested = true;
+            }
+
+            public void StopWaveform()
+            {
+                WaveformStops++;
+                WaveformRequested = false;
+            }
+
+            public Task ReadWaveformAsync(CancellationToken cancellationToken)
+            {
+                WaveformWaits++;
+                WaveformRequested = true;
+                return Task.CompletedTask;
             }
 
             public void DetectScenes()

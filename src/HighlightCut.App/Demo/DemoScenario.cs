@@ -27,7 +27,7 @@ public static partial class DemoScenario
         editor.ToolStatus = "ffmpeg 7.1 · ready";
         editor.ZoomLevel = 0;
         // The design shows every marker layer (the user's own chips are not touched in demo mode).
-        editor.ShowKeyframes = editor.ShowSilences = editor.ShowScenes = editor.ShowFrames = editor.SnapToKeyframes = true;
+        editor.ShowKeyframes = editor.ShowWaveform = editor.ShowSilences = editor.ShowScenes = editor.ShowFrames = editor.SnapToKeyframes = true;
         editor.Settings.LoadDemo();
 
         if (screen == DesignScreen.Empty)

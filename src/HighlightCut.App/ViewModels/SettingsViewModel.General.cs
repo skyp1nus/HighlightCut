@@ -191,6 +191,7 @@ public sealed partial class SettingsViewModel
         $"Video output {_editor.VideoOutput ?? "not started"} · decoder {_editor.Player?.CurrentDecoder ?? "—"}",
         $"Open file {_editor.MediaInfoText}",
         $"Analysis {_editor.Media?.AnalysisTimes ?? "—"}",
+        $"Timeline chips {_editor.ChipSummary} (a file is analysed only for what is on)",
         $"Settings {AppSettingsStore.DefaultFile}",
         $"Logs {CrashLog.Folder}");
 

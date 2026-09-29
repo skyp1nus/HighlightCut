@@ -207,9 +207,12 @@ public sealed partial class ExportViewModel : ViewModelBase
         nameof(IsInProgress))]
     public partial string? ErrorText { get; set; }
 
-    /// <summary>Waiting for the keyframe scan before the cuts can be planned.</summary>
+    /// <summary>
+    /// Finding the keyframes before the cuts can be planned: a lossless export starts each clip on one, and they are
+    /// scanned only when needed (the Keyframes chip may be off).
+    /// </summary>
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(Title), nameof(Stats), nameof(ProgressText))]
+    [NotifyPropertyChangedFor(nameof(Title), nameof(Stats), nameof(ProgressText), nameof(ProgressDetail))]
     public partial bool IsPreparing { get; set; }
 
     /// <summary>Demo only: restart the simulated progress after it completes.</summary>
@@ -346,7 +349,7 @@ public sealed partial class ExportViewModel : ViewModelBase
             if (IsDone)
                 return "Export complete";
             if (IsPreparing)
-                return "Preparing…";
+                return "Finding keyframes…";
             int clips = Math.Max(1, Merge && Rows.Count > Included.Count ? Rows.Count - 1 : Rows.Count);
             int current = Rows.IndexOf(Rows.FirstOrDefault(r => r.IsCurrent) ?? Rows.LastOrDefault()!) + 1;
             return current > clips ? $"Concatenating {clips} clips" : $"Writing clip {Math.Max(1, current)} of {clips}";
@@ -391,7 +394,7 @@ public sealed partial class ExportViewModel : ViewModelBase
             if (HasError)
                 return ErrorText!;
             if (IsPreparing)
-                return "scanning keyframes";
+                return $"{Math.Floor((Preview?.KeyframeProgress ?? 0) * 100):0}% · a lossless cut starts each clip on a keyframe";
             double elapsed = ((_finished ?? DateTime.UtcNow) - _started).TotalSeconds;
             string remaining = IsDone ? "done"
                 : Progress > 0.02 ? "~" + TimeFormat.Clock(elapsed * (1 - Progress) / Progress) + " left"
@@ -807,9 +810,12 @@ public sealed partial class ExportViewModel : ViewModelBase
         Outcome = ExportOutcome.Running;
         try
         {
-            IsPreparing = Mode == ExportMode.Copy && !preview.KeyframesTask.IsCompleted;
+            // A lossless export needs the keyframes: they are scanned now unless the Keyframes chip found them already.
+            IsPreparing = Mode == ExportMode.Copy && !preview.KeyframesComplete;
+            if (IsPreparing)
+                StartStatsTimer();
             var keyframes = Mode == ExportMode.Copy
-                ? await preview.KeyframesTask.WaitAsync(cts.Token).ConfigureAwait(true)
+                ? await preview.ReadKeyframesAsync(cts.Token).ConfigureAwait(true)
                 : preview.Keyframes;
             cts.Token.ThrowIfCancellationRequested();
             IsPreparing = false;

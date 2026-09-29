@@ -103,7 +103,7 @@ public sealed record SilencesResult(
     [property: Description("Total silence, in seconds.")] double Total,
     [property: Description("Peak level (dBFS) below which audio counted as silent.")] double ThresholdDb,
     [property: Description("Level of the quietest 5 % of the audio: roughly the background noise.")] double NoiseFloorDb,
-    [property: Description("False while the audio is still being analysed; the silences found so far are listed.")] bool Complete,
+    [property: Description("False if not all of the audio could be read; the silences found in the part read are listed.")] bool Complete,
     string? Note);
 
 public sealed record ScenesResult(
@@ -144,8 +144,8 @@ public sealed class EditorTools(IEditorHost host)
         1-based output positions. Lossless export starts each clip at the keyframe at or before its start;
         use find_keyframes when exact starts matter.
 
-        You cannot see or hear the video, but find_silences shows where the speaker pauses (analysed as soon as
-        a video is opened) and find_scene_changes where the picture changes (a cut, a new slide or window). Scene
+        You cannot see or hear the video, but find_silences shows where the speaker pauses (the first call reads the
+        audio, which takes a moment on a long video) and find_scene_changes where the picture changes (a cut, a new slide or window). Scene
         detection reads every frame, so it starts the first time you ask and fills in: call again for the rest.
         cut_silences removes pauses in one step.
 
@@ -199,15 +199,18 @@ public sealed class EditorTools(IEditorHost host)
 
     [McpServerTool(Name = "find_keyframes", Title = "Find keyframes", ReadOnly = true, Idempotent = true)]
     [Description("Keyframe times between two points of the source. A lossless export starts each clip at the keyframe at or " +
-                 "before its start, so starting clips on keyframes avoids extra lead-in.")]
-    public Task<IReadOnlyList<double>> FindKeyframes([Description("Seconds.")] double start, [Description("Seconds.")] double end) =>
-        host.RunAsync(ctx =>
+                 "before its start, so starting clips on keyframes avoids extra lead-in. The first call may take a moment " +
+                 "while the video is scanned.")]
+    public Task<IReadOnlyList<double>> FindKeyframes([Description("Seconds.")] double start, [Description("Seconds.")] double end,
+        CancellationToken cancellationToken = default) =>
+        host.RunAsync(async ctx =>
         {
             RequireFile(ctx);
-            if (ctx.Keyframes.Count == 0)
-                throw new McpException("Keyframes are not scanned yet" + (ctx.AnalysisStatus is { } a ? $" ({a})" : "") + ". Try again shortly.");
-            IReadOnlyList<double> times = [.. ctx.Keyframes.Where(t => t >= start && t <= end).Take(500).Select(Round)];
-            return Task.FromResult(times);
+            var keyframes = await ctx.ReadKeyframesAsync(cancellationToken).ConfigureAwait(true);
+            if (keyframes.Count == 0)
+                throw new McpException("This file has no keyframes to cut on (no video, or the scan failed).");
+            IReadOnlyList<double> times = [.. keyframes.Where(t => t >= start && t <= end).Take(500).Select(Round)];
+            return times;
         });
 
     [McpServerTool(Name = "list_videos", Title = "List recent videos", ReadOnly = true, Idempotent = true, OpenWorld = true)]
@@ -231,24 +234,26 @@ public sealed class EditorTools(IEditorHost host)
 
     [McpServerTool(Name = "find_silences", Title = "Find silences", ReadOnly = true, Idempotent = true)]
     [Description("Pauses where every audio track (or the given tracks) stays quiet. The level follows the recording's " +
-                 "background noise unless you give one. cut_silences removes them.")]
+                 "background noise unless you give one. cut_silences removes them. The first call may take a moment while " +
+                 "the audio is read.")]
     public Task<SilencesResult> FindSilences(
         [Description("Shortest pause, in seconds (default 1).")] double minDuration = 1.0,
         [Description("Peak level in dBFS that counts as silent, e.g. -40; automatic if omitted.")] double? thresholdDb = null,
         [Description("Audio track numbers (as in get_project) that must be quiet; all if omitted.")] IReadOnlyList<int>? tracks = null,
         [Description("Only pauses that end after this time, in seconds.")] double? start = null,
-        [Description("Only pauses that begin before this time, in seconds.")] double? end = null) =>
-        host.RunAsync(ctx =>
+        [Description("Only pauses that begin before this time, in seconds.")] double? end = null,
+        CancellationToken cancellationToken = default) =>
+        host.RunAsync(async ctx =>
         {
-            var report = Silences(ctx, minDuration, thresholdDb, tracks);
+            var report = await SilencesAsync(ctx, minDuration, thresholdDb, tracks, cancellationToken).ConfigureAwait(true);
             var ranges = report.Ranges.Where(r => r.End > (start ?? double.MinValue) && r.Start < (end ?? double.MaxValue)).ToList();
             const int Max = 500;
-            string? note = !report.IsComplete ? "The audio is still being analysed" + (ctx.AnalysisStatus is { } a ? $" ({a})" : "") + "; call again for the rest."
+            string? note = !report.IsComplete ? "Not all of the audio could be read" + (ctx.AnalysisStatus is { } a ? $" ({a})" : "") + "; these are the pauses in the part that was."
                 : ranges.Count > Max ? $"Only the first {Max} are listed; narrow the range or raise minDuration."
                 : ranges.Count == 0 ? $"No pauses of {minDuration:0.##} s or more below {report.ThresholdDb:0.#} dBFS." : null;
-            return Task.FromResult(new SilencesResult(
+            return new SilencesResult(
                 [.. ranges.Take(Max).Select(r => new SilenceInfo(Round(r.Start), Round(r.End), Round(r.End - r.Start), RangeText(r.Start, r.End)))],
-                ranges.Count, Round(ranges.Sum(r => r.End - r.Start)), report.ThresholdDb, report.NoiseFloorDb, report.IsComplete, note));
+                ranges.Count, Round(ranges.Sum(r => r.End - r.Start)), report.ThresholdDb, report.NoiseFloorDb, report.IsComplete, note);
         });
 
     [McpServerTool(Name = "find_scene_changes", Title = "Find scene changes", ReadOnly = true, Idempotent = true)]
@@ -351,19 +356,20 @@ public sealed class EditorTools(IEditorHost host)
         [Description("Peak level in dBFS that counts as silent; automatic if omitted (see find_silences).")] double? thresholdDb = null,
         [Description("Seconds of each pause to keep on both sides (default 0.15).")] double padding = 0.15,
         [Description("Clip ids to cut; every included clip if omitted.")] IReadOnlyList<int>? clips = null,
-        [Description("Audio track numbers that must be quiet; all if omitted.")] IReadOnlyList<int>? tracks = null) =>
-        host.RunAsync(ctx =>
+        [Description("Audio track numbers that must be quiet; all if omitted.")] IReadOnlyList<int>? tracks = null,
+        CancellationToken cancellationToken = default) =>
+        host.RunAsync(async ctx =>
         {
             if (padding < 0)
                 throw new McpException("The padding cannot be negative.");
-            var report = Silences(ctx, minDuration, thresholdDb, tracks);
+            var report = await SilencesAsync(ctx, minDuration, thresholdDb, tracks, cancellationToken).ConfigureAwait(true);
             if (!report.IsComplete)
-                throw new McpException("The audio is still being analysed" + (ctx.AnalysisStatus is { } a ? $" ({a})" : "") + ". Try again shortly.");
+                throw new McpException("Not all of the audio could be read" + (ctx.AnalysisStatus is { } a ? $" ({a})" : "") + ", so nothing was cut.");
             var cuts = report.Ranges.Select(r => new TimeRange(r.Start + padding, r.End - padding))
                 .Where(r => r.End - r.Start >= 0.05).ToList();
-            return Task.FromResult(CutOut(ctx, cuts, clips, "cut_silences",
+            return CutOut(ctx, cuts, clips, "cut_silences",
                 n => $"Removed {n} silence{(n == 1 ? "" : "s")}",
-                $"No pauses of {minDuration:0.##} s or more below {report.ThresholdDb:0.#} dBFS in those clips; nothing changed."));
+                $"No pauses of {minDuration:0.##} s or more below {report.ThresholdDb:0.#} dBFS in those clips; nothing changed.");
         });
 
     [McpServerTool(Name = "cut_ranges", Title = "Cut out ranges")]
@@ -794,6 +800,15 @@ public sealed class EditorTools(IEditorHost host)
         {
             Result = $"{description}: {Round(before - ctx.Session.Project.OutputDuration)} s shorter.",
         };
+    }
+
+    /// <summary>The silences once all the audio is read (read now if the user's chips did not ask for it).</summary>
+    private static async Task<SilenceReport> SilencesAsync(IEditorContext ctx, double minDuration, double? thresholdDb,
+        IReadOnlyList<int>? tracks, CancellationToken cancellationToken)
+    {
+        Silences(ctx, minDuration, thresholdDb, tracks);
+        await ctx.ReadAudioAsync(cancellationToken).ConfigureAwait(true);
+        return Silences(ctx, minDuration, thresholdDb, tracks);
     }
 
     private static SilenceReport Silences(IEditorContext ctx, double minDuration, double? thresholdDb, IReadOnlyList<int>? tracks)

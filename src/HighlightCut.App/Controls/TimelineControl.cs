@@ -508,6 +508,9 @@ public sealed class TimelineControl : Control, ICustomHitTest
             }
         }
 
+        // The bars only with the Waveform chip on (the audio may have been read for silences or to even out volumes).
+        if (!editor.ShowWaveform)
+            return;
         // One lane per audio stream, sharing the track; bars are centred with a 1 px gap.
         int lanes = Math.Max(1, editor.AudioLanes.Count);
         double laneHeight = (AudioHeight - 12) / lanes;

@@ -113,23 +113,49 @@ single right answer, so the command refuses with an `EditException` and the UI s
   peaks above −45 dBFS) and the volumes that bring the streams to the average of their levels, a boost never passing
   0 dBFS at the loudest peak. The editor's "Even out all tracks" uses it.
 
-In the App, `FfmpegMediaOpener` probes a file and creates a `MediaPreview`, which runs the analyses in
-parallel (or reads them from the cache) and raises `Changed` as results arrive; the timeline redraws, and the
-keyframes are handed to the editing session for snapping. How long each part took, or that it came from the cache,
-is in Copy diagnostics ("Analysis keyframes 0.2 s · thumbnails 0.3 s · …").
+In the App, `FfmpegMediaOpener` probes a file and creates a `MediaPreview`. Opening reads nothing else: the player
+starts at once and every analysis runs only when something asks for it, in the background (or from the cache),
+raising `Changed` as results arrive; the timeline redraws, and keyframes are handed to the editing session for
+snapping. How long each part took, or that it came from the cache, is in Copy diagnostics ("Analysis keyframes 0.2 s
+· thumbnails 0.3 s · …"), with the chips that were on ("Timeline chips keyframes off · waveform on · …").
 
-Keyframes (needed for lossless cuts) and the waveform are always read. Thumbnails are made only while the timeline's
-Frames chip is on (off at first: the player shows the picture anyway, and without them a 10-minute 1080p file opens in
-about 1.4 s instead of 2.1 s). The editor asks for them as it loads the file (`MediaPreview.ExtractThumbnails`), so
-they are then part of opening it: the processing screen and its progress include "Making thumbnails". Turned on later,
-the open file's are made in the background (status bar: "making thumbnails 40%"), or read from the cache at once.
-Turned off, a run under way stops (`StopThumbnails`) and keeps nothing of it, nothing cached; a finished set is kept
-in memory, only not drawn. With the chip off the video track is a plain strip of the same height, keyframe ticks and
-scene markers on it as before, and without thumbnails the player shows black until mpv's first frame.
+The timeline's chips decide what is read, and all of them are off at first (`TimelineSettings`):
+
+| Chip | Reads | For |
+|---|---|---|
+| Keyframes | keyframes (`ScanKeyframes`) | the ticks; trims snap to them |
+| Waveform | the audio (`ReadWaveform`) | the bars on the audio lanes |
+| Silence | the audio too (silences are found in it) | the silence bands |
+| Frames | thumbnails (`ExtractThumbnails`) | the video track's pictures (the player shows the picture anyway) |
+| Scenes | every frame (`DetectScenes`) | scene change markers |
+
+Keyframes and the waveform are each an `OnDemandRead`: a chip turned on starts it for the open file (and every file
+opened after), turned off it stops an unfinished run and `drop`s what it had, so nothing half done is kept or cached;
+what finished stays, and turning the chip on again is instant. A feature that needs the data asks for it itself and
+waits (`ReadKeyframesAsync`, `ReadWaveformAsync`), which keeps the read going even if the chip goes off meanwhile; a
+cancelled wait stops it unless something else still wants it. A lossless export finds the keyframes first ("Finding
+keyframes…" in the export dialog, with its progress); "Even out all tracks" and Claude's `find_silences` and
+`cut_silences` read the whole audio first, and `find_keyframes` scans. Snap to keyframes snaps only to keyframes
+already found; a trim always stops at the next clip (the magnet). Settings files from when Keyframes and Silence were
+on by default read them as off once (they are saved as `keyframeTicks` and `silenceBands` now), and then keep what the
+user chooses. The design's screens show every chip.
+
+On a 10-minute 1080p file with two audio tracks (Linux, 4 cores, nothing cached), the editor used to wait about 2 s
+for the keyframes and the waveform after the probe (about 0.07 s); with the chips off it is ready after the probe.
+
+Whatever the chips ask for as the editor loads the file is part of opening it: the processing screen and its
+progress include it. Turned on later, the open file's part is read in the background (status bar: "finding keyframes
+40%", "reading the audio 40%", "making thumbnails 40%"), or read from the cache at once. Thumbnails turned off keep
+nothing of an unfinished run, nothing cached; a finished set is kept in memory, only not drawn. With the Frames chip
+off the video track is a plain strip of the same height, keyframe ticks and scene markers on it as before, and without
+thumbnails the player shows black until mpv's first frame. With the Waveform chip off the audio lanes have no bars
+(silence bands still show with their own chip).
 
 While that runs for more than 0.4 s, a processing screen covers the editor below the title bar (`ProcessingOverlay`,
 design "HighlightCut — екран обробки", X1): a slowly changing blob (`BlobView`, drawn every frame while shown), the file,
-a progress line and "Reading the audio · 72% · about 8 s left". The part named is the one furthest behind
+a progress line and "Reading the audio (for the waveform and silences) · 72% · about 8 s left", each part saying what
+it is for ("Finding keyframes (where clips can be cut without re-encoding)"). With nothing asked for it never shows.
+The part named is the one furthest behind
 (`MediaPreview.AnalysisStage`); the time left comes from the rate of the last few seconds, smoothed so it counts down
 (`TimeLeftEstimator`). It fades and settles in, and fades out growing a little into the editor; a file read from the
 cache never shows it.
@@ -228,7 +254,8 @@ sample, playback is simulated over the thumbnails.
 
 Both live in `HighlightCut.Media.Analysis` and keep their raw measurements, so a different sensitivity is instant.
 
-- **Silences** (`SilenceDetector`) come from the waveform the timeline already has: 10 ms peak buckets per audio
+- **Silences** (`SilenceDetector`) come from the waveform (read while the Waveform or Silence chip is on, or for Claude's
+  silence tools): 10 ms peak buckets per audio
   track, like ffmpeg's `silencedetect` but without decoding the audio again. A stretch counts as silent when every
   chosen track stays under the level for at least the minimum length (1 s on the timeline). The default level is
   12 dB over the noise floor (the level of the quietest 5 % of the audio), kept between −55 and −35 dBFS, so a
@@ -236,7 +263,8 @@ Both live in `HighlightCut.Media.Analysis` and keep their raw measurements, so a
 - **Scene changes** (`SceneDetector`) need the whole video decoded, so they are found only when asked for: the
   timeline's Scenes chip (off at first; while it is on, every video opened is searched) or Claude's
   `find_scene_changes` (`MediaPreview.DetectScenes`); scene changes cached from an earlier run are read straight away.
-  Turning the chip off stops a search under way (`MediaPreview.StopScenes`) and keeps nothing of it. Detection waits for the rest of the analysis (status bar: "detecting
+  Turning the chip off stops a search under way (`MediaPreview.StopScenes`) and keeps nothing of it. Detection waits for
+  what the file was opened with (status bar: "detecting
   scenes 34%") and runs on the GPU or every CPU core (below normal priority). ffmpeg shrinks every frame (at the video's own
   rate, up to 60 fps, timed from the file start like keyframes) to 64×36 grey and pipes it out; each frame is
   scored against the one before as ffmpeg's `scdet` does: the mean difference, but no more than its jump from the
@@ -276,8 +304,8 @@ Claude ──stdio──> HighlightCut.exe mcp (McpBridge) ──named pipe─�
 | --- | --- |
 | `get_project` | Source (with each audio track's volume and mute), playhead, selection and clips in output order |
 | `get_history` | Recent edits (user's and Claude's) with ids for `revert_action` |
-| `find_keyframes` | Keyframe times in a range (lossless cuts start on them) |
-| `find_silences` | Pauses at a minimum length and level (automatic by default), on all or some audio tracks |
+| `find_keyframes` | Keyframe times in a range (lossless cuts start on them); scans the video first if needed |
+| `find_silences` | Pauses at a minimum length and level (automatic by default), on all or some audio tracks; reads the audio first if needed |
 | `find_scene_changes` | Scene changes at a sensitivity; what is found so far while detection runs |
 | `cut_silences` | Cuts the pauses out of the included (or given) clips as one undo step, keeping some padding |
 | `get_transcript` | What is said, as timed sentences (and words on request), in parts of about 20,000 characters; starts transcription if needed |
@@ -359,7 +387,7 @@ bind to view models and never change the project themselves.
   models folder chosen inside the old folder follows it (`Relocate`), and the log says what happened. The folder
   keeps a `moved-from-OurCut.txt` note, and while it is there Settings → MCP server says to add HighlightCut to
   Claude Code and Claude Desktop again (the old entries start `OurCut.exe` under the name `ourcut`).
-  `Timeline` is the timeline toolbar's chips (Frames, Keyframes, Silence, Scenes, Snap), saved as they are clicked and put
+  `Timeline` is the timeline toolbar's chips (Frames, Keyframes, Waveform, Silence, Scenes, Snap), saved as they are clicked and put
   back for every project and run (`SettingsViewModel.ApplyTimeline`); the design's screens show them all and save none.
   Playback is read before the player is created, which starts with the saved decoding and audio device. Changes apply
   while it plays: `IPlayer.SetHardwareDecoding` (mpv `hwdec`), `SetAudioDevice` (`audio-device`, one of
@@ -442,7 +470,7 @@ and Whisper large-v3-turbo, small and base.en (99 languages; base.en English onl
   The timeline's Transcript chip is the same setting: turned on, the open video is transcribed too; turned off, a
   transcription under way stops (`MediaPreview.StopTranscription`).
   A transcript cached earlier with the chosen model is shown when the file opens either way. It runs after
-  keyframes, waveform and thumbnails (it may overlap scene detection), on every core below normal priority. The status bar shows "transcribing 34%", the transcript fills in piece by piece
+  what the chips read as the file opened (it may overlap scene detection), on every core below normal priority. The status bar shows "transcribing 34%", the transcript fills in piece by piece
   and is cached per model and language (`transcript-<model>-<language>.json`). Installing a model or changing the
   model or language starts it (with "Transcribe when a video is opened" off, only a transcript already asked for).
 

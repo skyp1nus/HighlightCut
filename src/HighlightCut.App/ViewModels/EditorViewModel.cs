@@ -184,7 +184,8 @@ public sealed partial class EditorViewModel : ViewModelBase
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(HasFile), nameof(IsEmpty), nameof(Duration), nameof(DurationText),
         nameof(SourceLengthText), nameof(StatusRight), nameof(FrameText), nameof(HasSilenceData), nameof(HasSceneData),
-        nameof(SilenceTip), nameof(ScenesTip), nameof(CanToggleScenes), nameof(ScenesOn),
+        nameof(SilenceTip), nameof(ScenesTip), nameof(CanToggleScenes), nameof(ScenesOn), nameof(KeyframesTip), nameof(WaveformTip),
+        nameof(SnapTip), nameof(CanToggleKeyframes), nameof(KeyframesOn), nameof(CanToggleAudio), nameof(WaveformOn), nameof(SilencesOn),
         nameof(TransportDurationText), nameof(VideoAspect), nameof(HasPlayback))]
     public partial IMediaPreview? Media { get; set; }
 
@@ -215,7 +216,8 @@ public sealed partial class EditorViewModel : ViewModelBase
             Session.Keyframes = keyframes;
         }
         foreach (string name in (string[])[nameof(HasSilenceData), nameof(HasSceneData), nameof(SilenceTip), nameof(ScenesTip),
-                     nameof(CanToggleScenes), nameof(ScenesOn)])
+                     nameof(CanToggleScenes), nameof(ScenesOn), nameof(KeyframesTip), nameof(WaveformTip), nameof(SnapTip),
+                     nameof(CanToggleKeyframes), nameof(KeyframesOn), nameof(CanToggleAudio), nameof(WaveformOn), nameof(SilencesOn)])
             OnPropertyChanged(name);
         Processing.Update();
         if (media.AnalysisError is { } error && !_previewErrorShown)
@@ -326,9 +328,12 @@ public sealed partial class EditorViewModel : ViewModelBase
     [ObservableProperty]
     public partial double ZoomLevel { get; set; }
 
-    /// <summary>Keyframe snapping while trimming ("Snap to keyframes" in the timeline toolbar). Alt turns it off during a drag.</summary>
+    /// <summary>
+    /// Keyframe snapping while trimming ("Snap to keyframes" in the timeline toolbar), once the keyframes are known (the
+    /// Keyframes chip finds them). Alt turns it off during a drag.
+    /// </summary>
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(StatusRight))]
+    [NotifyPropertyChangedFor(nameof(StatusRight), nameof(SnapTip))]
     public partial bool SnapToKeyframes { get; set; } = true;
 
     /// <summary>Timeline tool: Select (V) selects and trims; Split cuts the clip where you click.</summary>
@@ -339,10 +344,18 @@ public sealed partial class EditorViewModel : ViewModelBase
     public bool IsSelectTool => Tool == TimelineTool.Select;
     public bool IsSplitTool => Tool == TimelineTool.Split;
 
-    /// <summary>Marker layers on the timeline (toolbar chips).</summary>
+    // Marker layers on the timeline (toolbar chips). What a chip shows is worked out only while it is on, so with them off
+    // (the settings' defaults) opening a video reads nothing but its header. They start on for the design's screens.
+
+    /// <summary>Keyframe ticks; while on, keyframes are scanned in every video opened (trims then snap to them).</summary>
     [ObservableProperty]
     public partial bool ShowKeyframes { get; set; } = true;
 
+    /// <summary>The audio waveform; while on, the audio of every video opened is read.</summary>
+    [ObservableProperty]
+    public partial bool ShowWaveform { get; set; } = true;
+
+    /// <summary>Silence bands; while on, the audio of every video opened is read to find them.</summary>
     [ObservableProperty]
     public partial bool ShowSilences { get; set; } = true;
 
@@ -361,10 +374,31 @@ public sealed partial class EditorViewModel : ViewModelBase
     public bool HasSilenceData => Media?.Silences.Count > 0;
     public bool HasSceneData => Media?.SceneChanges.Count > 0;
 
-    public string SilenceTip => Media is not { } media ? "Silence bands"
+    public string SilenceTip => !ShowSilences ? "Show pauses of a second or more (finding them reads all the audio)"
+        : Media is not { } media ? "Silence bands: pauses of a second or more, found in every video you open"
+        : media.AudioStreamCount == 0 ? "No audio in this file"
         : media.Silences.Count is > 0 and var n ? $"Silence bands: {n} pause{(n == 1 ? "" : "s")} of a second or more"
-        : !media.SilencesComplete ? "Looking for silences…"
-        : media.AudioStreamCount == 0 ? "No audio in this file" : "No pauses of a second or more in this file";
+            + (media.SilencesComplete ? "" : " so far")
+        : !media.SilencesComplete ? "Reading the audio to find pauses…"
+        : "No pauses of a second or more in this file";
+
+    public string KeyframesTip => !ShowKeyframes
+        ? "Show keyframes: the frames a clip can start on without re-encoding. Finding them reads the video once; trims then snap to them"
+        : Media is not { } media ? "Keyframe ticks: found in every video you open; trims snap to them"
+        : media.FrameRate <= 0 ? "No video in this file"
+        : !media.KeyframesComplete ? "Finding keyframes…"
+        : $"Keyframes: {media.Keyframes.Count}. A lossless export starts each clip on one; trims snap to them";
+
+    public string WaveformTip => !ShowWaveform ? "Show the audio waveform (reading it goes through all the audio once)"
+        : Media is not { } media ? "Audio waveform: read in every video you open"
+        : media.AudioStreamCount == 0 ? "No audio in this file"
+        : media.SilencesComplete ? "Audio waveform: how loud each track is over time"
+        : "Reading the audio…";
+
+    public string SnapTip => (HasFile && Media is { Keyframes.Count: 0 }
+            ? "Snap trims to keyframes (turn on Keyframes to find them)."
+            : "Snap trims to keyframes.")
+        + " A trim always stops at the next clip; hold Alt to drag freely";
 
     public string ScenesTip => !ShowScenes ? "Show scene changes (finding them reads every frame, so it takes a while)"
         : Media is not { } media ? "Scene changes: found in every video you open"
@@ -388,7 +422,22 @@ public sealed partial class EditorViewModel : ViewModelBase
     private void ToggleKeyframes() => ShowKeyframes = !ShowKeyframes;
 
     [RelayCommand]
+    private void ToggleWaveform() => ShowWaveform = !ShowWaveform;
+
+    [RelayCommand]
     private void ToggleSilences() => ShowSilences = !ShowSilences;
+
+    /// <summary>The Keyframes chip works without a file (the choice is kept for the next one), not for a file without video.</summary>
+    public bool CanToggleKeyframes => CanToggleScenes;
+
+    /// <summary>The Keyframes chip is lit.</summary>
+    public bool KeyframesOn => ShowKeyframes && CanToggleKeyframes;
+
+    /// <summary>The Waveform and Silence chips work without a file, not for a file without audio.</summary>
+    public bool CanToggleAudio => !HasFile || Media is { AudioStreamCount: > 0 };
+
+    public bool WaveformOn => ShowWaveform && CanToggleAudio;
+    public bool SilencesOn => ShowSilences && CanToggleAudio;
 
     /// <summary>The Scenes chip works without a file (the choice is kept for the next one), not for a file without video.</summary>
     public bool CanToggleScenes => !HasFile || Media is { FrameRate: > 0 };
@@ -409,9 +458,52 @@ public sealed partial class EditorViewModel : ViewModelBase
     [RelayCommand]
     private void ZoomFit() => ZoomLevel = 0;
 
-    partial void OnShowKeyframesChanged(bool value) => ChipChanged();
-    partial void OnShowSilencesChanged(bool value) => ChipChanged();
     partial void OnSnapToKeyframesChanged(bool value) => ChipChanged();
+
+    /// <summary>On: the open video's keyframes are scanned (and every later one's). Off: an unfinished scan stops.</summary>
+    partial void OnShowKeyframesChanged(bool value)
+    {
+        if (!_showingChips)
+        {
+            if (value)
+                Media?.ScanKeyframes();
+            else
+                Media?.StopKeyframes();
+        }
+        foreach (string name in (string[])[nameof(KeyframesOn), nameof(KeyframesTip)])
+            OnPropertyChanged(name);
+        ChipChanged();
+    }
+
+    partial void OnShowWaveformChanged(bool value)
+    {
+        OnPropertyChanged(nameof(WaveformOn));
+        OnPropertyChanged(nameof(WaveformTip));
+        AudioChipChanged();
+    }
+
+    partial void OnShowSilencesChanged(bool value)
+    {
+        OnPropertyChanged(nameof(SilencesOn));
+        OnPropertyChanged(nameof(SilenceTip));
+        AudioChipChanged();
+    }
+
+    /// <summary>
+    /// The Waveform or Silence chip changed. Either on: the open video's audio is read (and every later one's), since
+    /// silences are found in the waveform. Both off: an unfinished read stops.
+    /// </summary>
+    private void AudioChipChanged()
+    {
+        if (!_showingChips)
+        {
+            if (ShowWaveform || ShowSilences)
+                Media?.ReadWaveform();
+            else
+                Media?.StopWaveform();
+        }
+        ChipChanged();
+    }
 
     /// <summary>On: the open video's scene changes are found (and every later one's). Off: an unfinished search stops.</summary>
     partial void OnShowScenesChanged(bool value)
@@ -451,6 +543,7 @@ public sealed partial class EditorViewModel : ViewModelBase
     {
         _showingChips = true;
         ShowKeyframes = chips.Keyframes;
+        ShowWaveform = chips.Waveform;
         ShowSilences = chips.Silences;
         ShowScenes = chips.Scenes;
         ShowFrames = chips.Frames;
@@ -459,12 +552,17 @@ public sealed partial class EditorViewModel : ViewModelBase
         _showingChips = false;
     }
 
+    /// <summary>Which chips are on, for Copy diagnostics: "keyframes off · waveform on · silence on · scenes off · frames off".</summary>
+    internal string ChipSummary => string.Join(" · ",
+        new[] { ("keyframes", ShowKeyframes), ("waveform", ShowWaveform), ("silence", ShowSilences), ("scenes", ShowScenes), ("frames", ShowFrames) }
+            .Select(c => $"{c.Item1} {(c.Item2 ? "on" : "off")}"));
+
     /// <summary>A chip changed: redraw, and keep the choice for the next project (the design's screens keep nothing).</summary>
     private void ChipChanged()
     {
         RaiseTimelineChanged();
         if (!_showingChips && !IsDemo)
-            Settings.SaveTimeline(new TimelineSettings(ShowKeyframes, ShowSilences, ShowScenes, SnapToKeyframes, ShowFrames));
+            Settings.SaveTimeline(new TimelineSettings(ShowKeyframes, ShowSilences, ShowScenes, SnapToKeyframes, ShowFrames, ShowWaveform));
     }
 
     // ---- Totals and status ---------------------------------------------------------------
@@ -586,6 +684,11 @@ public sealed partial class EditorViewModel : ViewModelBase
             StartTranscription();
         else
             LoadCachedTranscript();
+        // Only what the chips show is read; with them all off the file is ready as soon as it is probed.
+        if (ShowKeyframes)
+            media.ScanKeyframes();
+        if (ShowWaveform || ShowSilences)
+            media.ReadWaveform();
         if (ShowScenes)
             media.DetectScenes();
         if (ShowFrames)
