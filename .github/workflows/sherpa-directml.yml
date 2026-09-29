@@ -31,7 +31,7 @@ env:
   DIRECTML_VERSION: '1.15.4'
   DIRECTML_SHA256: '4e7cb7ddce8cf837a7a75dc029209b520ca0101470fcdf275c1f49736a3615b9'
   # Bump for any change to how it is built; it names the release and the asset.
-  REVISION: '1'
+  REVISION: '2'
 
 jobs:
   build:
@@ -135,20 +135,33 @@ jobs:
           foreach ($f in 'sherpa-onnx-c-api.dll', 'onnxruntime.dll', 'DirectML.dll') {
             Copy-Item -LiteralPath "install/lib/$f" -Destination $pkg
           }
+          # Microsoft's DirectML build of ONNX Runtime uses the Visual C++ runtime (the CPU one sherpa-onnx ships does
+          # not), which not every PC has: it goes along, app-local, from Visual Studio's redistributable folder.
+          $crt = Split-Path -Parent (& "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -find 'VC\Redist\MSVC\*\x64\Microsoft.VC14*.CRT\vcruntime140.dll' | Sort-Object | Select-Object -Last 1)
+          Write-Host "Visual C++ runtime from $crt"
+          foreach ($f in 'msvcp140.dll', 'msvcp140_1.dll', 'vcruntime140.dll', 'vcruntime140_1.dll') {
+            Copy-Item -LiteralPath "$crt/$f" -Destination $pkg
+          }
           $licenses = New-Item -ItemType Directory -Force -Path pkg/licenses
           Copy-Item src/LICENSE "$licenses/sherpa-onnx-LICENSE.txt"
           Copy-Item build/_deps/onnxruntime-src/LICENSE "$licenses/onnxruntime-LICENSE.txt"
           Copy-Item build/_deps/onnxruntime-src/ThirdPartyNotices.txt "$licenses/onnxruntime-ThirdPartyNotices.txt"
           Copy-Item build/_deps/directml-src/LICENSE.txt "$licenses/DirectML-LICENSE.txt"
           Copy-Item build/_deps/directml-src/ThirdPartyNotices.txt "$licenses/DirectML-ThirdPartyNotices.txt"
+          "msvcp140*.dll and vcruntime140*.dll are the Microsoft Visual C++ runtime $(Split-Path -Leaf (Split-Path -Parent (Split-Path -Parent $crt))), redistributable files of Visual Studio under its license terms." |
+            Set-Content "$licenses/VC-runtime-NOTICE.txt"
 
-          # The C API needs only ONNX Runtime and Windows; anything else would have to be shipped too.
-          $imports = Imports pkg/sherpa-onnx-c-api.dll
-          Write-Host "sherpa-onnx-c-api.dll imports: $($imports -join ', ')"
-          foreach ($i in $imports) {
-            if ($i -ne 'onnxruntime.dll' -and -not (Test-Path "$env:SystemRoot\System32\$i")) { throw "sherpa-onnx-c-api.dll needs $i, which is not packaged." }
+          # Every library the package's DLLs load is in the package or part of Windows. The Visual C++ runtime counts as
+          # neither: this runner has it installed, many PCs do not.
+          foreach ($dll in Get-ChildItem pkg/*.dll) {
+            $imports = Imports $dll.FullName
+            Write-Host "$($dll.Name) imports: $($imports -join ', ')"
+            foreach ($i in $imports) {
+              $windows = $i -match '^(api|ext)-ms-' -or ((Test-Path "$env:SystemRoot\System32\$i") -and $i -notmatch '^(msvcp|vcruntime|concrt)')
+              if (-not $windows -and -not (Test-Path "pkg/$i")) { throw "$($dll.Name) needs $i, which is not packaged." }
+            }
           }
-          if ($imports -notcontains 'onnxruntime.dll') { throw 'sherpa-onnx-c-api.dll does not import onnxruntime.dll.' }
+          if ((Imports pkg/sherpa-onnx-c-api.dll) -notcontains 'onnxruntime.dll') { throw 'sherpa-onnx-c-api.dll does not import onnxruntime.dll.' }
           if ((Exports pkg/onnxruntime.dll) -notcontains 'OrtSessionOptionsAppendExecutionProvider_DML') { throw 'onnxruntime.dll has no DirectML provider.' }
 
           # A drop-in for the NuGet runtime package: every function its C API has, this one has too.
@@ -165,6 +178,7 @@ jobs:
             "sherpa-onnx v$env:SHERPA_ONNX_VERSION ($commit) with DirectML, win-x64, built by $env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID"
             "ONNX Runtime $env:ORT_VERSION (Microsoft.ML.OnnxRuntime.DirectML), DirectML $env:DIRECTML_VERSION (Microsoft.AI.DirectML)"
             "Options: BUILD_SHARED_LIBS=ON SHERPA_ONNX_ENABLE_DIRECTML=ON, static CRT, no programs or examples"
+            "Visual C++ runtime (for onnxruntime.dll): $crt"
           ) | Set-Content pkg/BUILD-INFO.txt
 
           Compress-Archive -Path pkg/* -DestinationPath "$out/${{ steps.names.outputs.asset }}" -CompressionLevel Optimal
