@@ -5,6 +5,14 @@ on:
     branches: [master, 'claude/**']
     tags: ['v*']
   pull_request:
+  # Actions → CI → Run workflow on master with "release" ticked publishes the Version in Directory.Build.props: the
+  # release job creates its vX.Y.Z tag with the release (docs/releasing.md).
+  workflow_dispatch:
+    inputs:
+      release:
+        description: Publish the Version in Directory.Build.props as a GitHub release (creates the vX.Y.Z tag)
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -20,14 +28,19 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Version in Directory.Build.props is the one version number (docs/releasing.md). A v* tag must be that version;
-      # any other build is <Version>-dev.<run number>.
+      # Version in Directory.Build.props is the one version number (docs/releasing.md). A v* tag must be that version, and
+      # so is a release started with Run workflow on master; any other build is <Version>-dev.<run number>.
       - name: Work out the version
         shell: pwsh
+        env:
+          RELEASE: ${{ github.event_name == 'workflow_dispatch' && inputs.release }}
         run: |
           $props = (Select-Xml -Path Directory.Build.props -XPath '//Version').Node.InnerText.Trim()
           if ($env:GITHUB_REF_TYPE -eq 'tag') {
             if ($env:GITHUB_REF_NAME -ne "v$props") { throw "The tag $env:GITHUB_REF_NAME is not v$props, the Version in Directory.Build.props." }
+            $version = $props
+          } elseif ($env:RELEASE -eq 'true') {
+            if ($env:GITHUB_REF -ne 'refs/heads/master') { throw "Releases are made from master, not $env:GITHUB_REF." }
             $version = $props
           } else {
             $version = "$props-dev.$env:GITHUB_RUN_NUMBER"
@@ -173,10 +186,12 @@ jobs:
           path: artifacts/screenshots/
           if-no-files-found: ignore
 
-  # Tags v* become the Latest GitHub release, "V0.1.0 First Cut ✂️", with the Windows build attached and notes that
-  # scripts/release-notes.py builds from CHANGELOG.md and CHANGELOG.uk.md.
+  # Tags v* (or Run workflow on master with "release") become the Latest GitHub release, "V0.1.0 First Cut ✂️", with the
+  # Windows build attached and notes that scripts/release-notes.py builds from CHANGELOG.md and CHANGELOG.uk.md.
   release:
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: >-
+      startsWith(github.ref, 'refs/tags/v')
+      || (github.event_name == 'workflow_dispatch' && inputs.release && github.ref == 'refs/heads/master')
     needs: [windows, linux]
     runs-on: ubuntu-latest
     permissions:
@@ -194,7 +209,12 @@ jobs:
       # Fails when the version has no notes or the Ukrainian notes do not match the English ones.
       - name: Build the release notes
         run: |
-          version="${GITHUB_REF_NAME#v}"
+          if [[ "$GITHUB_REF_TYPE" == tag ]]; then
+            version="${GITHUB_REF_NAME#v}"
+          else
+            version=$(sed -n 's:.*<Version>\(.*\)</Version>.*:\1:p' Directory.Build.props)
+          fi
+          echo "RELEASE_TAG=v$version" >> "$GITHUB_ENV"
           python3 scripts/release-notes.py "$version" --output release-notes.md
           title=$(python3 scripts/release-notes.py "$version" --title)
           echo "RELEASE_TITLE=$title" >> "$GITHUB_ENV"
@@ -205,12 +225,13 @@ jobs:
           name: HighlightCut-win-x64
           path: HighlightCut-win-x64
 
-      # --latest: the app release is Latest, not the older pre-releases that hold the native GPU runtime.
+      # --latest: the app release is Latest, not the older pre-releases that hold the native GPU runtime. From Run
+      # workflow the tag does not exist yet: --target creates it on the commit that was built.
       - name: Create the release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          archive="HighlightCut-${GITHUB_REF_NAME#v}-windows-x64.zip"
+          archive="HighlightCut-${RELEASE_TAG#v}-windows-x64.zip"
           (cd HighlightCut-win-x64 && zip -qr9 "../$archive" .)
-          gh release create "$GITHUB_REF_NAME" "$archive" --repo "$GITHUB_REPOSITORY" --latest \
+          gh release create "$RELEASE_TAG" "$archive" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --latest \
             --title "$RELEASE_TITLE" --notes-file release-notes.md

@@ -53,14 +53,16 @@ once after an update ("What’s new"); the GitHub release has both.
    python3 scripts/release-notes.py --title  # V0.1.0 First Cut ✂️
    ```
 
-4. Tag the merge commit and push the tag:
+4. On GitHub, open Actions → CI → **Run workflow**, keep the branch on `master`, tick **release** and run it. Or tag
+   the merge commit and push the tag:
 
    ```sh
    git tag vX.Y.Z origin/master
    git push origin vX.Y.Z
    ```
 
-   CI builds the tag, checks it against the Version, and creates the GitHub release "VX.Y.Z Codename 🎬", marked
+   Run workflow builds master as version X.Y.Z and the release creates the `vX.Y.Z` tag on that commit. Either way, CI
+   builds it, checks it against the Version, and creates the GitHub release "VX.Y.Z Codename 🎬", marked
    Latest, with the Windows build as `HighlightCut-X.Y.Z-windows-x64.zip` and the notes from
    `scripts/release-notes.py`: the logo and tagline, how to download and start it, the English notes and the
    Ukrainian ones, numbered. It fails when that section is missing or empty, or the two files do not match.
