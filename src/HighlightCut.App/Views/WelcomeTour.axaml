@@ -182,7 +182,7 @@
                   <TextBlock Text="{Binding CommandHint}" FontSize="12" Foreground="{StaticResource Text2Brush}" TextWrapping="Wrap" />
                   <Border CornerRadius="8" Background="{StaticResource WindowBrush}" BorderBrush="#14FFFFFF" BorderThickness="1">
                     <Panel>
-                      <ScrollViewer MaxHeight="150" Margin="14,12,76,12" HorizontalScrollBarVisibility="Disabled">
+                      <ScrollViewer MaxHeight="112" Margin="14,12,76,12" HorizontalScrollBarVisibility="Disabled">
                         <SelectableTextBlock Name="CommandText" Text="{Binding Command}" FontFamily="{StaticResource MonoFont}" FontSize="11.5"
                                              LineHeight="17.8" Foreground="{StaticResource Text2Brush}" TextWrapping="Wrap" />
                       </ScrollViewer>
@@ -190,7 +190,7 @@
                               HorizontalAlignment="Right" VerticalAlignment="Top" Content="{Binding CopyLabel}" Command="{Binding CopyCommand}" />
                     </Panel>
                   </Border>
-                  <StackPanel Orientation="Horizontal" Spacing="10">
+                  <StackPanel Orientation="Horizontal" Spacing="8">
                     <Button Name="SetupButton" Classes="bone" Height="30" Padding="14,0" CornerRadius="6" FontSize="12" FontWeight="Medium"
                             Command="{Binding RunSetupCommand}">
                       <StackPanel Orientation="Horizontal" Spacing="8">
@@ -198,9 +198,15 @@
                         <TextBlock Text="{Binding SetupLabel}" VerticalAlignment="Center" />
                       </StackPanel>
                     </Button>
-                    <TextBlock Name="SetupNote" Text="{Binding SetupNote}" FontSize="11" Foreground="{StaticResource MutedBrush}"
-                               VerticalAlignment="Center" TextWrapping="Wrap" MaxWidth="360" />
+                    <Button Name="OtherSetupButton" Classes="soft" Height="30" Padding="12,0" CornerRadius="6" FontSize="12"
+                            Content="{Binding OtherSetupLabel}" Command="{Binding RunOtherSetupCommand}" />
                   </StackPanel>
+                  <WrapPanel ItemSpacing="10" MaxWidth="460" HorizontalAlignment="Left">
+                    <TextBlock Name="SetupNote" Text="{Binding SetupNote}" FontSize="11" LineHeight="16" Foreground="{StaticResource MutedBrush}"
+                               VerticalAlignment="Center" TextWrapping="Wrap" MaxWidth="460" />
+                    <Button Name="InstallLink" Classes="link" FontSize="11" Content="Install Claude Code" IsVisible="{Binding IsInstallLinkVisible}"
+                            Command="{Binding Settings.InstallClaudeCodeCommand}" />
+                  </WrapPanel>
                   <TextBlock Text="You can do this later in Settings → MCP server." FontSize="11" Foreground="{StaticResource MutedBrush}" />
                 </StackPanel>
               </StackPanel>

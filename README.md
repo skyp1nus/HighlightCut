@@ -54,12 +54,17 @@ Not yet: smart cut. The UI already has a place for it.
 ## Connecting Claude
 
 HighlightCut is an MCP server: `HighlightCut.exe mcp` speaks MCP over stdio and forwards Claude's tool calls to the editor,
-starting HighlightCut when Claude first uses it. **Settings → MCP server** shows whether Claude is connected, turns the
-server off ("Let Claude connect"), and shows the exact command for your install with Copy buttons:
+starting HighlightCut when Claude first uses it. The welcome tour's last step and **Settings → MCP server** add it for you,
+and show whether Claude is connected. Settings → MCP server also turns the server off ("Let Claude connect").
 
-- **Claude Code**: `claude mcp add --scope user highlightcut -- "C:\path\to\HighlightCut.exe" mcp`
-- **Claude Desktop**: add this to `%APPDATA%\Claude\claude_desktop_config.json` (Settings → Developer → Edit Config)
-  and restart Claude Desktop:
+- **Claude Code**: **Add to Claude Code** runs `claude mcp add --scope user highlightcut -- "C:\path\to\HighlightCut.exe" mcp`
+  (after removing an earlier `highlightcut` entry, so adding again fixes a moved install). If the `claude` command isn't
+  installed it links to [its install page](https://code.claude.com/docs/en/setup). **Open terminal** runs the same
+  steps in a terminal window, and Copy gives you the command to run yourself. Then start a new Claude Code chat.
+- **Claude Desktop**: **Add to Claude Desktop** adds the entry below to `%APPDATA%\Claude\claude_desktop_config.json`
+  (and to the Microsoft Store app's copy), keeping your other servers and settings and saving the old file as
+  `claude_desktop_config.json.bak`. If the file can't be read, it's left as it is: HighlightCut opens it and copies
+  the entry for you to add. Then quit Claude Desktop fully (right-click its tray icon → Quit) and start it again.
 
   ```json
   {
@@ -113,8 +118,8 @@ the preview cache are in `%LOCALAPPDATA%\HighlightCut`.
 
 HighlightCut used to be called OurCut. The first start after the rename moves `%LOCALAPPDATA%\OurCut` (settings,
 recent files, models, cache and logs) to `%LOCALAPPDATA%\HighlightCut`, and `.ourcut.json` projects still open. Claude
-knows the app by its old name until you add it again: run `claude mcp remove --scope user ourcut` and then the new
-command from Settings → MCP server, and replace the `ourcut` entry in Claude Desktop's config.
+knows the app by its old name until you add it again: Add to Claude Code and Add to Claude Desktop in Settings → MCP
+server also remove the old `ourcut` entries.
 
 ## Building
 

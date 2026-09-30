@@ -78,12 +78,25 @@
           <SelectableTextBlock Text="{Binding ClaudeCodeCommand}" />
         </Border>
         <Grid ColumnDefinitions="*,12,Auto">
-          <TextBlock Classes="help" Text="Run once in a terminal. Adds HighlightCut for all your projects." VerticalAlignment="Center" />
-          <Button Grid.Column="2" Classes="soft" Height="24" Padding="10,0" CornerRadius="6" FontSize="11.5"
-                  Content="{Binding ClaudeCodeCopyLabel}" Command="{Binding CopyClaudeCodeCommand}" />
+          <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+            <TextBlock Classes="help" Text="For all your projects." VerticalAlignment="Center" />
+            <Button Name="ClaudeCodeTerminalButton" Classes="link" FontSize="12" Content="Open terminal"
+                    Command="{Binding OpenClaudeCodeTerminalCommand}" VerticalAlignment="Center" />
+          </StackPanel>
+          <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+            <Button Classes="soft" Height="24" Padding="10,0" CornerRadius="6" FontSize="11.5"
+                    Content="{Binding ClaudeCodeCopyLabel}" Command="{Binding CopyClaudeCodeCommand}" />
+            <Button Name="AddToClaudeCodeButton" Classes="bone" Height="24" Padding="10,0" CornerRadius="6" FontSize="11.5"
+                    Content="Add to Claude Code" Command="{Binding AddToClaudeCodeCommand}" />
+          </StackPanel>
         </Grid>
+        <WrapPanel ItemSpacing="8" IsVisible="{Binding ClaudeCodeResult, Converter={x:Static ObjectConverters.IsNotNull}}">
+          <TextBlock Name="ClaudeCodeResultText" Classes="result" Text="{Binding ClaudeCodeResult}" />
+          <Button Classes="link" FontSize="12" Content="Install Claude Code" IsVisible="{Binding IsClaudeCodeMissing}"
+                  Command="{Binding InstallClaudeCodeCommand}" VerticalAlignment="Center" />
+        </WrapPanel>
         <TextBlock Name="ClaudeCodeRenameNote" Classes="help" IsVisible="{Binding ShowRenameNote}"
-                   Text="HighlightCut was called OurCut before. If you added it to Claude Code then, remove it with “claude mcp remove --scope user ourcut” and run the command above again." />
+                   Text="HighlightCut was called OurCut before. Add to Claude Code also removes the old “ourcut” entry (claude mcp remove --scope user ourcut)." />
       </StackPanel>
     </Grid></Border>
 
@@ -94,24 +107,38 @@
           <SelectableTextBlock Text="{Binding ClaudeDesktopConfig}" />
         </Border>
         <WrapPanel ItemSpacing="8" LineSpacing="4">
-          <TextBlock Text="Add to" FontSize="11" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center" />
+          <TextBlock Text="Goes into" FontSize="11" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center" />
           <TextBlock Classes="mono" Text="{Binding McpConfigPathText}" FontSize="11" Foreground="{StaticResource Text2Brush}"
                      VerticalAlignment="Center" />
           <Button Classes="link" FontSize="12" Content="Open file" Command="{Binding OpenClaudeDesktopConfigCommand}"
                   VerticalAlignment="Center" />
         </WrapPanel>
         <Grid ColumnDefinitions="*,12,Auto">
-          <TextBlock Classes="help" Text="Restart Claude Desktop after saving the file." VerticalAlignment="Center" />
-          <Button Grid.Column="2" Classes="soft" Height="24" Padding="10,0" CornerRadius="6" FontSize="11.5"
-                  Content="{Binding ClaudeDesktopCopyLabel}" Command="{Binding CopyClaudeDesktopCommand}" />
+          <TextBlock Classes="help" Text="Keeps your other servers." VerticalAlignment="Center" />
+          <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+            <Button Classes="soft" Height="24" Padding="10,0" CornerRadius="6" FontSize="11.5"
+                    Content="{Binding ClaudeDesktopCopyLabel}" Command="{Binding CopyClaudeDesktopCommand}" />
+            <Button Name="AddToClaudeDesktopButton" Classes="bone" Height="24" Padding="10,0" CornerRadius="6" FontSize="11.5"
+                    Content="Add to Claude Desktop" Command="{Binding AddToClaudeDesktopCommand}" />
+          </StackPanel>
         </Grid>
+        <TextBlock Name="ClaudeDesktopResultText" Classes="result" Text="{Binding ClaudeDesktopResult}"
+                   IsVisible="{Binding ClaudeDesktopResult, Converter={x:Static ObjectConverters.IsNotNull}}" />
         <TextBlock Name="ClaudeDesktopRenameNote" Classes="help" IsVisible="{Binding ShowRenameNote}"
-                   Text="If the file has an “ourcut” entry from before the rename, replace it with this one: it starts the old program." />
+                   Text="Add to Claude Desktop also removes the “ourcut” entry from before the rename: it starts the old program." />
       </StackPanel>
     </Grid></Border>
   </StackPanel>
 
   <UserControl.Styles>
+    <!-- What Add to Claude did: brighter than the help text around it. -->
+    <Style Selector="TextBlock.result">
+      <Setter Property="FontSize" Value="11.5" />
+      <Setter Property="LineHeight" Value="17" />
+      <Setter Property="Foreground" Value="{StaticResource Text2Brush}" />
+      <Setter Property="TextWrapping" Value="Wrap" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
     <Style Selector="Border.code">
       <Setter Property="Padding" Value="12,10" />
       <Setter Property="CornerRadius" Value="8" />

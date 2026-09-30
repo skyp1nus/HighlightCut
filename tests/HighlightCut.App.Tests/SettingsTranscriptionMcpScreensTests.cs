@@ -35,6 +35,8 @@ public class SettingsTranscriptionMcpScreensTests
 
     private static void ScrollToBottom(MainWindow window)
     {
+        // Lay out what just appeared first, so the extent is the whole section.
+        Pump();
         var scroll = window.GetVisualDescendants().OfType<SettingsDialog>().Single()
             .GetVisualDescendants().OfType<ScrollViewer>().First(s => s.Name == "Scroll");
         scroll.Offset = new Vector(0, scroll.Extent.Height);
@@ -126,6 +128,27 @@ public class SettingsTranscriptionMcpScreensTests
         Assert.Contains(editor.Settings.ClaudeDesktopConfig, code);
         Assert.Contains(editor.Settings.ClaudeCodeCommand, code);
         Save(window, "settings-mcp-connect");
+    }
+
+    [AvaloniaFact]
+    public void The_connect_claude_group_shows_what_add_did()
+    {
+        var (window, editor) = Open(DesignScreen.SettingsMcp);
+        var settings = editor.Settings;
+        TextBlock Result(string name) => window.GetVisualDescendants().OfType<TextBlock>().Single(t => t.Name == name);
+        Assert.False(Result("ClaudeCodeResultText").IsEffectivelyVisible);
+        Assert.False(Result("ClaudeDesktopResultText").IsEffectivelyVisible);
+
+        // Demo mode runs and writes nothing; it shows what the buttons say.
+        settings.AddToClaudeCodeCommand.Execute(null);
+        settings.AddToClaudeDesktopCommand.Execute(null);
+        ScrollToBottom(window);
+
+        Assert.Equal(SettingsViewModel.AddedToClaudeCode, Result("ClaudeCodeResultText").Text);
+        Assert.True(Result("ClaudeCodeResultText").IsEffectivelyVisible);
+        Assert.StartsWith("Added to Claude Desktop.", Result("ClaudeDesktopResultText").Text, StringComparison.Ordinal);
+        Assert.True(Result("ClaudeDesktopResultText").IsEffectivelyVisible);
+        Save(window, "settings-mcp-added");
     }
 
     [AvaloniaFact]

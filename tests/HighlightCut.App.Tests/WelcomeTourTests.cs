@@ -1,3 +1,5 @@
+using Avalonia;
+using Avalonia.Controls;
 using Avalonia.Headless;
 using Avalonia.Headless.XUnit;
 using Avalonia.Input;
@@ -165,37 +167,190 @@ public sealed class WelcomeTourTests : IDisposable
         Assert.False(tour.IsClaudeConnected);
         Assert.Equal("Waiting for Claude", tour.ClaudeStatusText);
         Assert.Equal(editor.Settings.ClaudeCodeCommand, tour.Command);
-        Assert.Equal("Open terminal", tour.SetupLabel);
-        Assert.Equal("Opens a terminal and runs the command.", tour.SetupNote);
+        Assert.Equal("Add to Claude Code", tour.SetupLabel);
+        Assert.Equal("Open terminal", tour.OtherSetupLabel);
+        // The demo screen shows what Add to Claude Code says; demo mode runs nothing.
+        Assert.Equal(SettingsViewModel.AddedToClaudeCode, tour.SetupNote);
 
         tour.ClientOptions[1].PickCommand.Execute(null);
         Assert.False(tour.IsClaudeCode);
         Assert.Equal(editor.Settings.ClaudeDesktopConfig, tour.Command);
-        Assert.Equal("Open config file", tour.SetupLabel);
+        Assert.Equal("Add to Claude Desktop", tour.SetupLabel);
+        Assert.Equal("Open config file", tour.OtherSetupLabel);
         Assert.Contains("claude_desktop_config.json", tour.CommandHint, StringComparison.Ordinal);
+        Assert.Equal("Your other servers stay, and the old file is kept as a .bak.", tour.SetupNote);
 
         tour.RunSetupCommand.Execute(null);
-        Assert.Equal("Created with HighlightCut in it. Restart Claude Desktop.", tour.SetupNote);
+        Assert.Equal("Added to Claude Desktop. " + SettingsViewModel.RestartClaudeDesktop, tour.SetupNote);
+
+        // Reopening starts clean.
+        tour.Open();
+        Assert.Null(editor.Settings.ClaudeDesktopResult);
 
         editor.Claude.IsConnected = true;
         Assert.True(tour.IsClaudeConnected);
         Assert.Equal("Claude connected", tour.ClaudeStatusText);
     }
 
-    [Fact]
-    public void Desktop_config_is_created_with_highlightcut_or_checked_for_it()
+    // A real (not demo) editor whose setup starts nothing and writes only in the test's folder.
+    private (EditorViewModel Editor, FakeProcessRunner Runner, List<string> Opened, List<string> Copied) RealSetup(params string[] claude)
     {
+        var editor = App.CreateEditor(null);
+        var runner = new FakeProcessRunner();
+        var opened = new List<string>();
+        var copied = new List<string>();
+        var settings = editor.Settings;
+        // claude, if given, is found on the PATH.
+        string path = string.Join(Path.PathSeparator, claude.Select(c => c[..c.LastIndexOfAny(['\\', '/'])]));
+        settings.Setup = new ClaudeSetup(ClaudeSetup.CurrentPlatform, name => name == "PATH" ? path : null, claude.Contains, runner)
+        {
+            ScriptFolder = Path.Combine(_dir, "scripts"),
+        };
+        settings.ClaudeDesktopConfigFiles = () => [Path.Combine(_dir, "Claude", "claude_desktop_config.json")];
+        settings.OpenFile = opened.Add;
+        settings.CopyText = text =>
+        {
+            copied.Add(text);
+            return Task.CompletedTask;
+        };
+        editor.Tour.Open();
+        editor.Tour.Step = 3;
+        return (editor, runner, opened, copied);
+    }
+
+    [AvaloniaFact]
+    public void Without_claude_code_nothing_runs_and_the_step_links_to_its_install_page()
+    {
+        var (editor, runner, opened, copied) = RealSetup();
+        var tour = editor.Tour;
+
+        tour.RunSetupCommand.Execute(null);
+        Assert.Contains("Claude Code isn’t installed", tour.SetupNote, StringComparison.Ordinal);
+        Assert.True(tour.IsInstallLinkVisible);
+        tour.RunOtherSetupCommand.Execute(null);
+        Assert.Empty(runner.Ran);
+        Assert.Empty(runner.Started);
+        Assert.False(Directory.Exists(Path.Combine(_dir, "scripts")));
+
+        editor.Settings.InstallClaudeCodeCommand.Execute(null);
+        Assert.Equal([ClaudeSetup.InstallPage], opened);
+        tour.CopyCommand.Execute(null);
+        Assert.Equal([editor.Settings.ClaudeCodeCommand], copied);
+
+        // Claude Desktop has no link.
+        tour.IsClaudeCode = false;
+        Assert.False(tour.IsInstallLinkVisible);
+    }
+
+    [AvaloniaFact]
+    public void Add_to_claude_code_runs_it_hidden_and_open_terminal_runs_the_same_steps()
+    {
+        string claude = OperatingSystem.IsWindows() ? @"C:\Users\a\AppData\Roaming\npm\claude.cmd" : "/home/a/bin/claude";
+        var (editor, runner, _, _) = RealSetup(claude);
+        var tour = editor.Tour;
+        editor.Settings.ShowRenameNote = true;
+
+        tour.RunSetupCommand.Execute(null);
+        Assert.Equal(SettingsViewModel.AddedToClaudeCode, tour.SetupNote);
+        Assert.False(tour.IsInstallLinkVisible);
+        // The old OurCut entry, an earlier HighlightCut, then the add.
+        Assert.Equal(3, runner.Ran.Count);
+        Assert.All(runner.Ran, r => Assert.True(r.CreateNoWindow));
+
+        runner.RunResults.Enqueue(() => new ProcessOutput(0, ""));
+        runner.RunResults.Enqueue(() => new ProcessOutput(0, ""));
+        runner.RunResults.Enqueue(() => new ProcessOutput(1, "MCP server highlightcut already exists in user config"));
+        tour.RunSetupCommand.Execute(null);
+        Assert.Equal("Claude Code couldn’t add it: MCP server highlightcut already exists in user config", tour.SetupNote);
+
+        tour.RunOtherSetupCommand.Execute(null);
+        Assert.NotEmpty(runner.Started);
+        string script = File.ReadAllText(Assert.Single(Directory.GetFiles(Path.Combine(_dir, "scripts"))));
+        Assert.Contains("mcp remove --scope user ourcut", script, StringComparison.Ordinal);
+        Assert.Contains("mcp add --scope user highlightcut", script, StringComparison.Ordinal);
+        Assert.StartsWith("Running in a new terminal.", tour.SetupNote, StringComparison.Ordinal);
+
+        for (int i = 0; i < 4; i++)
+            runner.StartResults.Enqueue(false);
+        tour.RunOtherSetupCommand.Execute(null);
+        Assert.Equal("Couldn’t open a terminal. The command is copied: paste it into one.", tour.SetupNote);
+    }
+
+    [AvaloniaFact]
+    public void Add_to_claude_desktop_merges_the_file_or_leaves_it_and_copies_the_entry()
+    {
+        var (editor, _, opened, copied) = RealSetup();
+        var tour = editor.Tour;
+        tour.IsClaudeCode = false;
         string file = Path.Combine(_dir, "Claude", "claude_desktop_config.json");
-        const string Entry = "{\n  \"mcpServers\": {\n    \"highlightcut\": {\n      \"command\": \"hc\",\n      \"args\": [\"mcp\"]\n    }\n  }\n}";
 
-        Assert.Equal(DesktopConfigState.Created, ClaudeSetup.PrepareDesktopConfig(file, Entry));
-        Assert.True(ClaudeSetup.HasHighlightCut(File.ReadAllText(file)));
-        Assert.Equal(DesktopConfigState.AlreadyAdded, ClaudeSetup.PrepareDesktopConfig(file, Entry));
+        tour.RunOtherSetupCommand.Execute(null);
+        Assert.Equal("There’s no claude_desktop_config.json yet. Add to Claude Desktop makes it.", tour.SetupNote);
 
-        File.WriteAllText(file, "{ \"mcpServers\": { \"other\": { \"command\": \"x\" } } }");
-        Assert.Equal(DesktopConfigState.NeedsEntry, ClaudeSetup.PrepareDesktopConfig(file, Entry));
-        Assert.False(ClaudeSetup.HasHighlightCut("not json"));
-        Assert.False(ClaudeSetup.HasHighlightCut("[]"));
+        tour.RunSetupCommand.Execute(null);
+        Assert.Equal("Added to Claude Desktop. " + SettingsViewModel.RestartClaudeDesktop, tour.SetupNote);
+        Assert.Contains("\"highlightcut\"", File.ReadAllText(file), StringComparison.Ordinal);
+        tour.RunSetupCommand.Execute(null);
+        Assert.StartsWith("HighlightCut is already in Claude Desktop.", tour.SetupNote, StringComparison.Ordinal);
+
+        File.WriteAllText(file, """{ "mcpServers": { "ourcut": { "command": "C:\\OurCut\\OurCut.exe" } } }""");
+        tour.RunSetupCommand.Execute(null);
+        Assert.StartsWith("Added to Claude Desktop, in place of the old OurCut entry.", tour.SetupNote, StringComparison.Ordinal);
+        Assert.Empty(copied);
+
+        File.WriteAllText(file, "{ broken");
+        tour.RunSetupCommand.Execute(null);
+        Assert.Equal("Nothing was changed: claude_desktop_config.json isn’t valid JSON. It’s open and the entry is copied: add it under mcpServers.",
+            tour.SetupNote);
+        Assert.Equal("{ broken", File.ReadAllText(file));
+        Assert.Equal([editor.Settings.ClaudeDesktopConfig], copied);
+        Assert.Equal([file], opened);
+
+        tour.RunOtherSetupCommand.Execute(null);
+        Assert.Equal([file, file], opened);
+    }
+
+    [AvaloniaFact]
+    public void The_connect_claude_states_render()
+    {
+        var (editor, runner, _, _) = RealSetup();
+        var window = new MainWindow { DataContext = editor, Width = 1440, Height = 900 };
+        window.Show();
+        var tour = editor.Tour;
+
+        void Save(string name)
+        {
+            Pump();
+            using var frame = window.CaptureRenderedFrame();
+            frame!.Save(Path.Combine(Screenshots.Directory, name + ".png"), new PngBitmapEncoderOptions());
+        }
+
+        tour.RunSetupCommand.Execute(null);
+        Pump();
+        var link = window.GetVisualDescendants().OfType<Button>().Single(b => b.Name == "InstallLink");
+        Assert.True(link.IsEffectivelyVisible);
+        Save("welcome-claude-missing");
+
+        editor.Settings.Setup = new ClaudeSetup(SetupPlatform.Linux, _ => null, _ => true, runner);
+        runner.RunResults.Enqueue(() => new ProcessOutput(0, ""));
+        runner.RunResults.Enqueue(() => new ProcessOutput(1, "Error: Invalid configuration: ~/.claude.json is not valid JSON. Fix or delete the file and try again."));
+        tour.RunSetupCommand.Execute(null);
+        Pump();
+        Assert.False(link.IsEffectivelyVisible);
+        Save("welcome-claude-failed");
+
+        tour.IsClaudeCode = false;
+        tour.RunSetupCommand.Execute(null);
+        Save("welcome-claude-desktop-added");
+
+        // The longest note still fits above the footer.
+        File.WriteAllText(Path.Combine(_dir, "Claude", "claude_desktop_config.json"), "{ broken");
+        tour.RunSetupCommand.Execute(null);
+        Save("welcome-claude-desktop-failed");
+        var note = window.GetVisualDescendants().OfType<TextBlock>().Single(t => t.Name == "SetupNote");
+        var stepText = window.GetVisualDescendants().OfType<TextBlock>().Single(t => t.Name == "StepText");
+        Assert.True(note.TranslatePoint(new Point(0, note.Bounds.Height), window)!.Value.Y < stepText.TranslatePoint(default, window)!.Value.Y);
+        window.Close();
     }
 
     [AvaloniaFact]

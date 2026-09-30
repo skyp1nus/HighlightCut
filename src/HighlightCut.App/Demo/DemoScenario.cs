@@ -44,7 +44,7 @@ public static partial class DemoScenario
         ApplyWelcome(editor, screen);
     }
 
-    /// <summary>The welcome tour's screens: its first step, or Connect Claude before Claude has connected.</summary>
+    /// <summary>The welcome tour's screens: its first step, or Connect Claude added to Claude Code, before Claude has connected.</summary>
     private static void ApplyWelcome(EditorViewModel editor, DesignScreen screen)
     {
         if (screen is not (DesignScreen.Welcome or DesignScreen.WelcomeClaude))
@@ -55,6 +55,8 @@ public static partial class DemoScenario
             editor.Claude.IsConnected = false;
             editor.Claude.IsListening = true;
             editor.Tour.Step = 3;
+            // Demo mode runs nothing: the step only shows the result.
+            editor.Settings.AddToClaudeCodeCommand.Execute(null);
         }
     }
 

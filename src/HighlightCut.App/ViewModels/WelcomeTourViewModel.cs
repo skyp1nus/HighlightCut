@@ -114,7 +114,7 @@ public sealed partial class WelcomeTourViewModel : ViewModelBase
     {
         StopNote();
         Step = 0;
-        SetupHint = null;
+        Settings.ClearClaudeResults();
         IsOpen = true;
     }
 
@@ -139,7 +139,7 @@ public sealed partial class WelcomeTourViewModel : ViewModelBase
         IsOpen = false;
         Step = 0;
         IsClaudeCode = true;
-        SetupHint = null;
+        Settings.ClearClaudeResults();
     }
 
     private void StopNote()
@@ -201,68 +201,48 @@ public sealed partial class WelcomeTourViewModel : ViewModelBase
 
     /// <summary>Claude Code (a terminal command) or Claude Desktop (its settings file).</summary>
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(Command), nameof(CommandHint), nameof(CopyLabel), nameof(SetupLabel), nameof(SetupNote))]
+    [NotifyPropertyChangedFor(nameof(Command), nameof(CommandHint), nameof(CopyLabel), nameof(SetupLabel), nameof(OtherSetupLabel),
+        nameof(SetupNote), nameof(IsInstallLinkVisible))]
     public partial bool IsClaudeCode { get; set; } = true;
 
-    partial void OnIsClaudeCodeChanged(bool value)
-    {
-        _clientChoices.Select(value);
-        SetupHint = null;
-    }
+    partial void OnIsClaudeCodeChanged(bool value) => _clientChoices.Select(value);
 
     public string Command => IsClaudeCode ? Settings.ClaudeCodeCommand : Settings.ClaudeDesktopConfig;
 
     public string CommandHint => IsClaudeCode
-        ? "Run this in a terminal, then start Claude Code."
-        : $"Add this to {Settings.McpConfigPathText} and restart Claude Desktop.";
+        ? "Add to Claude Code runs this for you. You can also paste it into a terminal."
+        : $"Add to Claude Desktop puts this in {Settings.McpConfigPathText} and keeps your other servers.";
 
     public string CopyLabel => IsClaudeCode ? Settings.ClaudeCodeCopyLabel : Settings.ClaudeDesktopCopyLabel;
 
     [RelayCommand]
     private Task Copy() => IsClaudeCode ? Settings.CopyClaudeCodeCommand.ExecuteAsync(null) : Settings.CopyClaudeDesktopCommand.ExecuteAsync(null);
 
-    public string SetupLabel => IsClaudeCode ? "Open terminal" : "Open config file";
+    public string SetupLabel => IsClaudeCode ? "Add to Claude Code" : "Add to Claude Desktop";
 
-    /// <summary>What the button did, once it was clicked; null before.</summary>
-    [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(SetupNote))]
-    public partial string? SetupHint { get; private set; }
+    /// <summary>The way to do it by hand: watch it run in a terminal, or open the file.</summary>
+    public string OtherSetupLabel => IsClaudeCode ? "Open terminal" : "Open config file";
 
-    public string SetupNote => SetupHint ?? (IsClaudeCode
-        ? "Opens a terminal and runs the command."
-        : "Opens claude_desktop_config.json, or creates it.");
+    /// <summary>What the buttons did (the same as Settings → MCP server shows), or what they will do.</summary>
+    public string SetupNote => IsClaudeCode
+        ? Settings.ClaudeCodeResult ?? "Adds HighlightCut for all your projects. Adding it again updates the entry."
+        : Settings.ClaudeDesktopResult ?? "Your other servers stay, and the old file is kept as a .bak.";
 
-    /// <summary>Open terminal (runs the command there) or Open config file (creates it with HighlightCut if there is none).</summary>
+    /// <summary>Claude Code isn’t installed: Install Claude Code next to the note.</summary>
+    public bool IsInstallLinkVisible => IsClaudeCode && Settings.IsClaudeCodeMissing;
+
+    /// <summary>Add to Claude Code (claude mcp add, hidden) or Add to Claude Desktop (merges the settings file).</summary>
     [RelayCommand]
-    private async Task RunSetup()
+    private Task RunSetup() => IsClaudeCode ? Settings.AddToClaudeCodeCommand.ExecuteAsync(null) : Settings.AddToClaudeDesktopCommand.ExecuteAsync(null);
+
+    /// <summary>Open terminal (the same steps, visible) or Open config file.</summary>
+    [RelayCommand]
+    private Task RunOtherSetup()
     {
         if (IsClaudeCode)
-        {
-            if (_editor.IsDemo || ClaudeSetup.RunInTerminal(Settings.ClaudeCodeCommand))
-            {
-                SetupHint = "Running in a new terminal. Start Claude Code when it’s done.";
-            }
-            else
-            {
-                await Settings.CopyClaudeCodeCommand.ExecuteAsync(null).ConfigureAwait(true);
-                SetupHint = "Couldn’t open a terminal. The command is copied: paste it into one.";
-            }
-            return;
-        }
-
-        string file = SettingsViewModel.ClaudeDesktopConfigFile;
-        var state = _editor.IsDemo ? DesktopConfigState.Created : ClaudeSetup.PrepareDesktopConfig(file, Settings.ClaudeDesktopConfig);
-        if (state is DesktopConfigState.NeedsEntry or DesktopConfigState.Failed)
-            await Settings.CopyClaudeDesktopCommand.ExecuteAsync(null).ConfigureAwait(true);
-        if (state != DesktopConfigState.Failed && !_editor.IsDemo)
-            FileManager.Open(file);
-        SetupHint = state switch
-        {
-            DesktopConfigState.Created => "Created with HighlightCut in it. Restart Claude Desktop.",
-            DesktopConfigState.AlreadyAdded => "HighlightCut is already in it. Restart Claude Desktop if it doesn’t show up.",
-            DesktopConfigState.NeedsEntry => "Opened, and the entry is copied. Add it to mcpServers, save, restart Claude.",
-            _ => "Couldn’t open the file. The entry is copied: add it yourself.",
-        };
+            return Settings.OpenClaudeCodeTerminalCommand.ExecuteAsync(null);
+        Settings.OpenClaudeDesktopConfigCommand.Execute(null);
+        return Task.CompletedTask;
     }
 
     /// <summary>The status badge: green once Claude is connected.</summary>
@@ -286,6 +266,12 @@ public sealed partial class WelcomeTourViewModel : ViewModelBase
                 break;
             case nameof(SettingsViewModel.ClaudeCodeCopyLabel) or nameof(SettingsViewModel.ClaudeDesktopCopyLabel):
                 OnPropertyChanged(nameof(CopyLabel));
+                break;
+            case nameof(SettingsViewModel.ClaudeCodeResult) or nameof(SettingsViewModel.ClaudeDesktopResult):
+                OnPropertyChanged(nameof(SetupNote));
+                break;
+            case nameof(SettingsViewModel.IsClaudeCodeMissing):
+                OnPropertyChanged(nameof(IsInstallLinkVisible));
                 break;
             case nameof(SettingsViewModel.Device) or nameof(SettingsViewModel.Model):
                 OnPropertyChanged(nameof(TranscriptText));
