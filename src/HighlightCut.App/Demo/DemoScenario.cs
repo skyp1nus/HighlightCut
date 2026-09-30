@@ -43,6 +43,7 @@ public static partial class DemoScenario
         ApplyClaude(editor, screen);
         ApplyGeneralPlaybackExport(editor, screen);
         ApplyKeyboard(editor, screen);
+        ApplySeveralVideos(editor, screen);
         ApplyWelcome(editor, screen);
         if (screen == DesignScreen.WhatsNew)
             editor.WhatsNew.Show();
@@ -85,6 +86,7 @@ public static partial class DemoScenario
     static partial void ApplyClaude(EditorViewModel editor, DesignScreen screen);
     static partial void ApplyGeneralPlaybackExport(EditorViewModel editor, DesignScreen screen);
     static partial void ApplyKeyboard(EditorViewModel editor, DesignScreen screen);
+    static partial void ApplySeveralVideos(EditorViewModel editor, DesignScreen screen);
 
     /// <summary>The settings section a screen shows (prototype <c>SET_VIEWS</c>); null when the dialog is closed.</summary>
     public static string? SettingsSection(DesignScreen screen) => screen switch

@@ -39,4 +39,7 @@ public enum DesignScreen
 
     /// <summary>What's new after an update, over the sample project.</summary>
     WhatsNew,
+
+    /// <summary>A project of three videos end to end, with clips in each and two meeting at a join.</summary>
+    SeveralVideos,
 }
