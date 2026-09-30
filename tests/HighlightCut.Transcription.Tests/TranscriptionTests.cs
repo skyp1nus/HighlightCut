@@ -140,6 +140,12 @@ public class TranscriptionPipelineTests
         /// <summary>Held until set; stands for a slow model.</summary>
         public ManualResetEventSlim Go { get; } = new(true);
 
+        /// <summary>Holds each piece until a second one is running beside it, so the overlap doesn't depend on timing.</summary>
+        public bool WaitForCompany { get; init; }
+
+        private readonly ManualResetEventSlim _together = new(false);
+        private volatile bool _alone;
+
         public IReadOnlyList<Word> Recognize(float[] samples, double offset)
         {
             int now = Interlocked.Increment(ref _running);
@@ -149,6 +155,11 @@ public class TranscriptionPipelineTests
                 if (OperatingSystem.IsWindows() && Thread.CurrentThread.Priority != ThreadPriority.BelowNormal)
                     LowPriority = false;
             }
+            if (now >= 2)
+                _together.Set();
+            // Pieces run one at a time never meet: wait once, not once per piece.
+            if (WaitForCompany && !_alone && !_together.Wait(TimeSpan.FromSeconds(10)))
+                _alone = true;
             Go.Wait();
             // Early pieces take longest, so they finish out of order.
             Thread.Sleep(Math.Max(0, 60 - (int)offset));
@@ -164,7 +175,7 @@ public class TranscriptionPipelineTests
     [Fact]
     public async Task Pieces_are_recognized_several_at_once_and_the_words_come_out_in_order()
     {
-        var recognizer = new ParallelRecognizer(3);
+        var recognizer = new ParallelRecognizer(3) { WaitForCompany = true };
         var progress = new List<double>();
         var pieces = new List<string>();
 
@@ -174,6 +185,7 @@ public class TranscriptionPipelineTests
             progress.Add(p);
         }, TestContext.Current.CancellationToken);
 
+        Assert.True(recognizer.MostAtOnce >= 2, "pieces never ran at the same time");
         Assert.InRange(recognizer.MostAtOnce, 2, 3);
         Assert.True(recognizer.LowPriority);
         Assert.Equal(["at0", "at21", "at44"], words.Select(w => w.Text));
