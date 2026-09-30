@@ -26,7 +26,7 @@ jobs:
   windows:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # Version in Directory.Build.props is the one version number (docs/releasing.md). A v* tag must be that version, and
       # so is a release started with Run workflow on master; any other build is <Version>-dev.<run number>.
@@ -48,12 +48,12 @@ jobs:
           Write-Host "Version $version"
           Add-Content -LiteralPath $env:GITHUB_ENV -Value "APP_VERSION=$version"
 
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/setup-dotnet@v6
         with:
           dotnet-version: '10.0.x'
 
       - name: Cache native dependency downloads
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: deps/.cache
           key: deps-${{ hashFiles('scripts/deps.json') }}
@@ -76,7 +76,7 @@ jobs:
 
       - name: Upload UI screenshots
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: screenshots-windows
           path: artifacts/screenshots/
@@ -90,7 +90,7 @@ jobs:
             -p:Version=$env:APP_VERSION -o artifacts/HighlightCut-win-x64
 
       - name: Upload the app
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: HighlightCut-win-x64
           path: artifacts/HighlightCut-win-x64/
@@ -105,14 +105,14 @@ jobs:
     env:
       HIGHLIGHTCUT_MODELS_DIR: ${{ github.workspace }}\models
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/setup-dotnet@v6
         with:
           dotnet-version: '10.0.x'
 
       - name: Cache native dependency downloads
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: deps/.cache
           key: deps-${{ hashFiles('scripts/deps.json') }}
@@ -125,7 +125,7 @@ jobs:
           Add-Content -LiteralPath $env:GITHUB_PATH -Value (Resolve-Path deps/win-x64).Path
 
       - name: Cache the models
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: models
           key: models-${{ hashFiles('src/HighlightCut.Transcription/Models/ModelCatalog.cs') }}
@@ -162,9 +162,9 @@ jobs:
   linux:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/setup-dotnet@v6
         with:
           dotnet-version: '10.0.x'
 
@@ -180,7 +180,7 @@ jobs:
 
       - name: Upload UI screenshots
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: screenshots-linux
           path: artifacts/screenshots/
@@ -197,7 +197,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           sparse-checkout: |
             CHANGELOG.md
@@ -220,7 +220,7 @@ jobs:
           echo "RELEASE_TITLE=$title" >> "$GITHUB_ENV"
           cat release-notes.md
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: HighlightCut-win-x64
           path: HighlightCut-win-x64
