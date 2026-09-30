@@ -200,6 +200,15 @@ public class ExportPlannerTests
         Assert.Throws<InvalidOperationException>(() => Plan(Settings(CutMode.SmartCut)));
 
     [Fact]
+    public void A_project_with_several_videos_is_not_exported_yet()
+    {
+        var second = new SourceMedia("/v/second.mp4", 30, 30);
+        var project = SampleProject.WithSources(SampleProject.Sources.Add(second with { Id = 2 }));
+        var ex = Assert.Throws<InvalidOperationException>(() => Plan(Settings(), project));
+        Assert.Equal("Exporting a project with several videos is not available yet.", ex.Message);
+    }
+
+    [Fact]
     public void An_export_never_overwrites_its_source()
     {
         var info = Info with { Path = Out("demo-cut.mp4") };

@@ -132,6 +132,24 @@ public sealed class MediaOpeningTests : IDisposable
     }
 
     [AvaloniaFact]
+    public async Task A_project_with_several_videos_is_not_opened_yet()
+    {
+        var opener = new SampleOpener();
+        var editor = App.CreateEditor(null, opener);
+        var first = DesignSample.Source with { Path = NewFile("part1.mp4") };
+        var second = DesignSample.Source with { Path = NewFile("part2.mp4"), Id = 2 };
+        string projectPath = Path.Combine(_dir, "trip" + ProjectFile.Extension);
+        await ProjectFile.SaveAsync(DesignSample.Project.WithSources([first, second]), projectPath, TestContext.Current.CancellationToken);
+
+        await editor.OpenProjectFileAsync(projectPath);
+
+        Assert.False(editor.HasFile);
+        Assert.Empty(opener.Opened);
+        Assert.Contains("The project has 2 videos; this version of HighlightCut opens projects with one video.", editor.StatusMessage,
+            StringComparison.Ordinal);
+    }
+
+    [AvaloniaFact]
     public async Task A_project_whose_video_is_gone_is_not_opened()
     {
         var editor = App.CreateEditor(null, new SampleOpener());
