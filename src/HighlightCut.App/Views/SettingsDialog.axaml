@@ -14,22 +14,27 @@
       <Grid ColumnDefinitions="208,*">
         <Border Background="{StaticResource PanelDeepBrush}" BorderBrush="{StaticResource DividerBrush}" BorderThickness="0,0,1,0"
                 Padding="10,16">
-          <StackPanel Spacing="2">
-            <TextBlock Text="Settings" FontSize="14" FontWeight="Medium" LetterSpacing="-0.3" Foreground="{StaticResource TextBrush}"
-                       Margin="8,0,8,12" />
-            <ItemsControl ItemsSource="{Binding SectionOptions}">
-              <ItemsControl.ItemsPanel>
-                <ItemsPanelTemplate>
-                  <StackPanel Spacing="2" />
-                </ItemsPanelTemplate>
-              </ItemsControl.ItemsPanel>
-              <ItemsControl.ItemTemplate>
-                <DataTemplate x:DataType="vm:ChoiceOption">
-                  <Button Classes="nav" Classes.on="{Binding IsSelected}" Content="{Binding Label}" Command="{Binding PickCommand}" />
-                </DataTemplate>
-              </ItemsControl.ItemTemplate>
-            </ItemsControl>
-          </StackPanel>
+          <DockPanel>
+            <!-- The app's version, quietly at the bottom. -->
+            <SelectableTextBlock Name="VersionText" DockPanel.Dock="Bottom" Margin="10,0" Text="{Binding AppVersion, StringFormat='HighlightCut {0}'}"
+                                 FontSize="11" Foreground="{StaticResource Muted3Brush}" />
+            <StackPanel Spacing="2">
+              <TextBlock Text="Settings" FontSize="14" FontWeight="Medium" LetterSpacing="-0.3" Foreground="{StaticResource TextBrush}"
+                         Margin="8,0,8,12" />
+              <ItemsControl ItemsSource="{Binding SectionOptions}">
+                <ItemsControl.ItemsPanel>
+                  <ItemsPanelTemplate>
+                    <StackPanel Spacing="2" />
+                  </ItemsPanelTemplate>
+                </ItemsControl.ItemsPanel>
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate x:DataType="vm:ChoiceOption">
+                    <Button Classes="nav" Classes.on="{Binding IsSelected}" Content="{Binding Label}" Command="{Binding PickCommand}" />
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+            </StackPanel>
+          </DockPanel>
         </Border>
 
         <Grid Grid.Column="1" RowDefinitions="Auto,*,52">

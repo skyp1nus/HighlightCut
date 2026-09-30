@@ -10,6 +10,8 @@
   </PropertyGroup>
   <ItemGroup>
     <AvaloniaResource Include="Assets\**" />
+    <!-- The release notes: What's new shows them, and so does the GitHub release. -->
+    <EmbeddedResource Include="..\..\CHANGELOG.md" LogicalName="CHANGELOG.md" Link="CHANGELOG.md" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\HighlightCut.Core\HighlightCut.Core.csproj" />

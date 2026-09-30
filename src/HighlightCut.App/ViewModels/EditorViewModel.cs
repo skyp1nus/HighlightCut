@@ -49,6 +49,7 @@ public sealed partial class EditorViewModel : ViewModelBase
         Claude = new ClaudePanelViewModel(new ClaudeExportViewModel(this), new ClaudeFileRequestViewModel(this));
         Settings = new SettingsViewModel(this);
         Tour = new WelcomeTourViewModel(this);
+        WhatsNew = new WhatsNewViewModel(this);
         TranscriptPanel = CreateTranscriptPanel();
         // The Transcript chip and "Transcribe when a video is opened" are one choice.
         Settings.PropertyChanged += (_, e) =>
@@ -104,6 +105,9 @@ public sealed partial class EditorViewModel : ViewModelBase
 
     /// <summary>The welcome tour: once on the first launch, then from the project menu.</summary>
     public WelcomeTourViewModel Tour { get; }
+
+    /// <summary>What's new: once after an update, then from the project menu.</summary>
+    public WhatsNewViewModel WhatsNew { get; }
 
     /// <summary>The screen over the editor while a file is prepared.</summary>
     public ProcessingViewModel Processing { get; } = new();

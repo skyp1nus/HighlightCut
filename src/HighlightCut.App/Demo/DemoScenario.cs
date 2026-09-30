@@ -30,6 +30,7 @@ public static partial class DemoScenario
         editor.ShowKeyframes = editor.ShowWaveform = editor.ShowSilences = editor.ShowScenes = editor.ShowFrames = editor.SnapToKeyframes = true;
         editor.Settings.LoadDemo();
         editor.Tour.Reset();
+        editor.WhatsNew.Reset();
 
         if (screen is DesignScreen.Empty or DesignScreen.Welcome or DesignScreen.WelcomeClaude or DesignScreen.WelcomeTranscript
             or DesignScreen.WelcomeDownloading)
@@ -43,6 +44,8 @@ public static partial class DemoScenario
         ApplyGeneralPlaybackExport(editor, screen);
         ApplyKeyboard(editor, screen);
         ApplyWelcome(editor, screen);
+        if (screen == DesignScreen.WhatsNew)
+            editor.WhatsNew.Show();
     }
 
     /// <summary>

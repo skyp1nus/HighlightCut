@@ -377,11 +377,29 @@ bind to view models and never change the project themselves.
   recent file when "On startup" is "Open the last project". `RecentFilesStore` keeps 20 files and lists `Limit` of
   them (Recent files: 5, 10 or 20). The cache card measures `MediaCache.Measure` (one folder per video) off the UI
   thread; Clear cache (`MediaCache.Clear`) keeps the open video's folder and every `transcript-*.json`.
-- **Settings file**: `AppSettings(Transcription, General?, Playback?, Export?, Keyboard?, Mcp?, Timeline?)` (records and enums
-  in `Services/Settings/`), saved by `AppSettingsStore` to `%LOCALAPPDATA%\HighlightCut\settings.json` with
-  source-generated JSON, enums by name (`LenientEnumConverter`). A section missing from the file (an older version
-  wrote it, or it is at its defaults) reads as null and means the defaults; a value this version does not know falls
-  back to its default, and the rest of the file is kept.
+- **Settings file**: `AppSettings(Transcription, General?, Playback?, Export?, Keyboard?, Mcp?, Timeline?,
+  WelcomeTourSeen, LastSeenVersion)` (records and enums in `Services/Settings/`), saved by `AppSettingsStore` to
+  `%LOCALAPPDATA%\HighlightCut\settings.json` with source-generated camelCase JSON, enums by name
+  (`LenientEnumConverter`). A section missing from the file (an older version wrote it, or it is at its defaults)
+  reads as null and means the defaults; a value this version does not know falls back to its default, and the rest of
+  the file is kept. `AppSettingsStore.Existed` says whether the file was there when the store was made, at start.
+- **Startup**: `App.OnFrameworkInitializationCompleted` reads the settings (before the player exists), creates the
+  editor, then `WhatsNewViewModel.OpenAtStart(file, store.Existed)` decides what opens over it, before
+  `EditorViewModel.StartAsync` opens the file. Someone is an existing user when the settings file existed or there are
+  recent files (older builds did not always write settings). A new user gets the welcome tour
+  (`WelcomeTourViewModel.ShouldOpenAtStart`: no file, nothing to reopen, not seen yet) and `LastSeenVersion` is set to
+  this version. An existing user whose `LastSeenVersion` is older than this version, or missing, gets What's new
+  (also with a file on the command line), which marks the tour as seen; closing it (Got it, Enter, Esc, Take the tour)
+  saves `LastSeenVersion`. The same version again (a dev build of it too) opens nothing, except the tour for someone
+  who has not had it. Demo mode opens neither. While either is open, `Shortcuts.Handle` runs none of the editor's keys.
+- **Versions and What's new**: `Version` in `Directory.Build.props` is the one version number; `AppVersion.Text` is
+  the assembly's informational version without `+sha` (0.1.0, or 0.1.0-dev.42 from CI) and `AppVersion.Release` its
+  X.Y.Z, which is what versions are compared by. Settings shows it at the bottom of the section list and in General →
+  About. `CHANGELOG.md` is embedded in the app (`LogicalName` CHANGELOG.md) and read by `Changelog.Parse`: `## X.Y.Z —
+  date` sections, `### New / Improved / Fixed` groups, `- ` bullets (an indented line continues one).
+  `Changelog.Since(lastSeen, current)` gives the sections What's new lists; without a last seen version only the
+  current one. The project menu → What's new shows this version's section. `ChangelogTests` fails when the current
+  version has no notes. See [releasing.md](releasing.md).
 - **App folder**: settings, `recent.json`, `models`, `cache` and `logs` live in `%LOCALAPPDATA%\HighlightCut`
   (`AppDataFolder`). On the first start after the rename, `Program.Main` moves the old `%LOCALAPPDATA%\OurCut` there
   (`AppDataFolder.MoveLegacy`): the whole folder when possible, else entry by entry, never overwriting what the new
@@ -413,7 +431,8 @@ bind to view models and never change the project themselves.
   700 px wide the step list narrows. The note after it is placed above the player controls.
 - **Demo mode**: `--demo <screen>` loads the design's sample (`DesignSample`, `DesignTranscript`,
   `DesignSettingsSample`) for a `DesignScreen`. `DemoScenario.Apply` does the common setup, then one partial hook per
-  area (`ApplyTranscriptionMcp`, `ApplyTranscript`, `ApplyClaude`, `ApplyGeneralPlaybackExport`, `ApplyKeyboard`).
+  area (`ApplyTranscriptionMcp`, `ApplyTranscript`, `ApplyClaude`, `ApplyGeneralPlaybackExport`, `ApplyKeyboard`), then
+  the welcome tour's and What's new's screens.
   `DesignScreensTests` renders every screen to `artifacts/screenshots/<screen>.png`.
 
 ### Not wired up yet

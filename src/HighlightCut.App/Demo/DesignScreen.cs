@@ -36,4 +36,7 @@ public enum DesignScreen
 
     /// <summary>The welcome tour's Transcript step while Parakeet downloads.</summary>
     WelcomeDownloading,
+
+    /// <summary>What's new after an update, over the sample project.</summary>
+    WhatsNew,
 }

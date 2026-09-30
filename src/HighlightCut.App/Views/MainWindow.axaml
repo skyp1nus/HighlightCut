@@ -40,5 +40,6 @@
     <v:ExportDialog DataContext="{Binding Export}" IsVisible="{Binding IsDialogOpen}" />
     <v:SettingsDialog DataContext="{Binding Settings}" IsVisible="{Binding IsOpen}" />
     <v:WelcomeTour DataContext="{Binding Tour}" />
+    <v:WhatsNewDialog DataContext="{Binding WhatsNew}" IsVisible="{Binding IsOpen}" />
   </Panel>
 </Window>
