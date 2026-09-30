@@ -48,6 +48,7 @@
                 <Separator />
                 <MenuItem Header="Export…" InputGesture="Ctrl+E" Command="{Binding Export.OpenCommand}" IsEnabled="{Binding HasFile}" />
                 <MenuItem Header="Settings…" Command="{Binding Settings.OpenCommand}" />
+                <MenuItem Header="Welcome tour" Command="{Binding Tour.OpenCommand}" />
                 <Separator />
                 <MenuItem Header="Exit" Click="OnExit" />
               </MenuFlyout>

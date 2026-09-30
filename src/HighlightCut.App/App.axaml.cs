@@ -57,7 +57,11 @@ public partial class App : Application
             editor.Dialogs = new StorageFileDialogs(window);
             editor.Settings.CopyText = text => window.Clipboard?.SetTextAsync(text) ?? Task.CompletedTask;
             desktop.MainWindow = window;
-            _ = editor.StartAsync(ParseFileArgument(args));
+            string? file = ParseFileArgument(args);
+            bool tour = editor.Tour.ShouldOpenAtStart(file);
+            _ = editor.StartAsync(file);
+            if (tour)
+                editor.Tour.Open();
             // Once, on the first start after the rename: Claude Code still knows the app by its old name.
             if (demo is null && AppDataFolder.MovedAtStart is { Found: true })
                 editor.ShowMessage("OurCut is now HighlightCut. To use it with Claude, add it again: Settings → MCP server.");

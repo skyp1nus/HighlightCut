@@ -29,8 +29,9 @@ public static partial class DemoScenario
         // The design shows every marker layer (the user's own chips are not touched in demo mode).
         editor.ShowKeyframes = editor.ShowWaveform = editor.ShowSilences = editor.ShowScenes = editor.ShowFrames = editor.SnapToKeyframes = true;
         editor.Settings.LoadDemo();
+        editor.Tour.Reset();
 
-        if (screen == DesignScreen.Empty)
+        if (screen is DesignScreen.Empty or DesignScreen.Welcome or DesignScreen.WelcomeClaude)
             editor.Claude.Recount();
         else
             ApplyEditor(editor, screen);
@@ -40,6 +41,21 @@ public static partial class DemoScenario
         ApplyClaude(editor, screen);
         ApplyGeneralPlaybackExport(editor, screen);
         ApplyKeyboard(editor, screen);
+        ApplyWelcome(editor, screen);
+    }
+
+    /// <summary>The welcome tour's screens: its first step, or Connect Claude before Claude has connected.</summary>
+    private static void ApplyWelcome(EditorViewModel editor, DesignScreen screen)
+    {
+        if (screen is not (DesignScreen.Welcome or DesignScreen.WelcomeClaude))
+            return;
+        editor.Tour.Open();
+        if (screen == DesignScreen.WelcomeClaude)
+        {
+            editor.Claude.IsConnected = false;
+            editor.Claude.IsListening = true;
+            editor.Tour.Step = 3;
+        }
     }
 
     // Per-area hooks, implemented in DemoScenario.<Area>.cs; each runs for every screen, in this order.

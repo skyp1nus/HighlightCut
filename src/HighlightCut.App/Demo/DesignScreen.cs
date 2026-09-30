@@ -24,4 +24,10 @@ public enum DesignScreen
     SettingsKeyboardRecording,
     SettingsKeyboardConflict,
     SettingsMcp,
+
+    /// <summary>The welcome tour over the empty editor (HighlightCut Onboarding.dc.html, 1b), first step.</summary>
+    Welcome,
+
+    /// <summary>The welcome tour's last step, Connect Claude, waiting for Claude.</summary>
+    WelcomeClaude,
 }
