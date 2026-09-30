@@ -1,0 +1,26 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:HighlightCut.App.ViewModels"
+             x:Class="HighlightCut.App.Views.ModelDownloadProgress"
+             x:DataType="vm:ModelOfferViewModel">
+  <!-- The model download of the Transcript tab and the welcome tour: id, percent, bar, "312 of 487 MB · 48 MB/s" and Cancel. -->
+  <Border Padding="12" CornerRadius="8.77" Background="{StaticResource PanelDeepBrush}" BorderBrush="{StaticResource DividerBrush}"
+          BorderThickness="1">
+    <StackPanel Spacing="8">
+      <Grid ColumnDefinitions="Auto,*,Auto">
+        <TextBlock Classes="mono" Text="{Binding Model.Id, FallbackValue=''}" FontSize="11" Foreground="{StaticResource Text2Brush}" />
+        <TextBlock Grid.Column="2" Classes="mono" Text="{Binding Model.PercentText, FallbackValue=''}" FontSize="11"
+                   FontWeight="Medium" Foreground="{StaticResource TextBrush}" />
+      </Grid>
+      <ProgressBar MinWidth="0" Height="3" MinHeight="3" CornerRadius="2" Minimum="0" Maximum="1"
+                   Value="{Binding Model.Progress, FallbackValue=0}"
+                   Background="{StaticResource FieldBrush}" Foreground="{StaticResource Text2Brush}" />
+      <Grid ColumnDefinitions="*,Auto">
+        <TextBlock Name="DetailText" Text="{Binding DownloadDetail}" FontSize="11" Foreground="{StaticResource MutedBrush}"
+                   VerticalAlignment="Center" />
+        <Button Name="CancelButton" Grid.Column="1" Classes="link" FontSize="11" Content="Cancel" Command="{Binding CancelCommand}"
+                AutomationProperties.Name="Cancel the model download" />
+      </Grid>
+    </StackPanel>
+  </Border>
+</UserControl>
