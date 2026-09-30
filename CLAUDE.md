@@ -21,4 +21,5 @@ screenshots to `artifacts/screenshots/`: look at the ones your change affects. `
 - Match the surrounding code: its comment density and naming, CommunityToolkit `[ObservableProperty]` /
   `[RelayCommand]`, and plain English UI text with curly apostrophes (’).
 - Settings change only through `UpdateSettings(s => s with { ... })`; the JSON is camelCase.
-- Commits: English, a short subject and a body of bullets.
+- Commits: English, a short subject and a body of bullets. No `Co-Authored-By` or `Claude-Session` lines in commits,
+  and no "Generated with Claude Code" footer or session link in pull request descriptions.
