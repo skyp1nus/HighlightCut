@@ -119,12 +119,12 @@ raising `Changed` as results arrive; the timeline redraws, and keyframes are han
 snapping. How long each part took, or that it came from the cache, is in Copy diagnostics ("Analysis keyframes 0.2 s
 · thumbnails 0.3 s · …"), with the chips that were on ("Timeline chips keyframes off · waveform on · …").
 
-The timeline's chips decide what is read, and all of them are off at first (`TimelineSettings`):
+The timeline's chips decide what is read (`TimelineSettings`). Waveform (and Snap) is on at first, the rest off:
 
 | Chip | Reads | For |
 |---|---|---|
 | Keyframes | keyframes (`ScanKeyframes`) | the ticks; trims snap to them |
-| Waveform | the audio (`ReadWaveform`) | the bars on the audio lanes |
+| Waveform | the audio (`ReadWaveform`), in the background | the bars on the audio lanes |
 | Silence | the audio too (silences are found in it) | the silence bands |
 | Frames | thumbnails (`ExtractThumbnails`) | the video track's pictures (the player shows the picture anyway) |
 | Scenes | every frame (`DetectScenes`) | scene change markers |
@@ -137,15 +137,19 @@ cancelled wait stops it unless something else still wants it. A lossless export 
 keyframes…" in the export dialog, with its progress); "Even out all tracks" and Claude's `find_silences` and
 `cut_silences` read the whole audio first, and `find_keyframes` scans. Snap to keyframes snaps only to keyframes
 already found; a trim always stops at the next clip (the magnet). Settings files from when Keyframes and Silence were
-on by default read them as off once (they are saved as `keyframeTicks` and `silenceBands` now), and then keep what the
-user chooses. The design's screens show every chip.
+on by default read them as off once (they are saved as `keyframeTicks` and `silenceBands` now), and files from when
+Waveform was off by default read it as on once (`waveformBars`); then they keep what the user chooses. The design's
+screens show every chip.
 
 On a 10-minute 1080p file with two audio tracks (Linux, 4 cores, nothing cached), the editor used to wait about 2 s
-for the keyframes and the waveform after the probe (about 0.07 s); with the chips off it is ready after the probe.
+for the keyframes and the waveform after the probe (about 0.07 s); with the default chips it is ready after the probe.
 
-Whatever the chips ask for as the editor loads the file is part of opening it: the processing screen and its
-progress include it. Turned on later, the open file's part is read in the background (status bar: "finding keyframes
-40%", "reading the audio 40%", "making thumbnails 40%"), or read from the cache at once. Thumbnails turned off keep
+What the Keyframes and Frames chips ask for as the editor loads the file is part of opening it: the processing screen
+and its progress include it. The audio (Waveform, Silence) never is: `MediaPreview.Analysis` does not wait for it, so
+the player starts at once and the bars fill in as they are read ("reading the audio 40%" in the status bar); scene
+detection and transcription, which wait for the opening, run beside it. Turned on later, the open file's part is read
+in the background (status bar: "finding keyframes 40%", "reading the audio 40%", "making thumbnails 40%"), or read
+from the cache at once. Thumbnails turned off keep
 nothing of an unfinished run, nothing cached; a finished set is kept in memory, only not drawn. With the Frames chip
 off the video track is a plain strip of the same height, keyframe ticks and scene markers on it as before, and without
 thumbnails the player shows black until mpv's first frame. With the Waveform chip off the audio lanes have no bars
@@ -153,11 +157,10 @@ thumbnails the player shows black until mpv's first frame. With the Waveform chi
 
 While that runs for more than 0.4 s, a processing screen covers the editor below the title bar (`ProcessingOverlay`,
 design "HighlightCut — екран обробки", X1): a slowly changing blob (`BlobView`, drawn every frame while shown), the file,
-a progress line and "Reading the audio (for the waveform and silences) · 72% · about 8 s left", each part saying what
-it is for ("Finding keyframes (where clips can be cut without re-encoding)"). With nothing asked for it never shows.
-The part named is the one furthest behind
-(`MediaPreview.AnalysisStage`); the time left comes from the rate of the last few seconds, smoothed so it counts down
-(`TimeLeftEstimator`). It fades and settles in, and fades out growing a little into the editor; a file read from the
+a progress line and "Finding keyframes (where clips can be cut without re-encoding) · 72% · about 8 s left", each part
+saying what it is for ("Making thumbnails for the video track"). With neither Keyframes nor Frames on it never shows.
+The part named is the one furthest behind (`MediaPreview.AnalysisStage`); the time left comes from the rate of the
+last few seconds, smoothed so it counts down (`TimeLeftEstimator`). It fades and settles in, and fades out growing a little into the editor; a file read from the
 cache never shows it.
 
 ### Lossless cuts

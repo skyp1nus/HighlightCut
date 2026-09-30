@@ -12,6 +12,7 @@ See [docs/releasing.md](docs/releasing.md).
 
 - The welcome tour offers the transcription model download on its Transcript step and explains the timeline chips.
 - The welcome tour works from the keyboard (Enter, the arrow keys, Tab stays in the dialog) and fits smaller windows.
+- The waveform is on by default, so you can see loud and quiet moments right away; turn it off with its chip. The video still plays at once while the waveform fills in.
 
 ## 0.1.0 — 2026-09-30
 

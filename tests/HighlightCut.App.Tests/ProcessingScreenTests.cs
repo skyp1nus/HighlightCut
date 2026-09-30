@@ -76,7 +76,7 @@ public sealed class ProcessingScreenTests
     public async Task A_longer_analysis_fades_in_says_what_is_left_and_fades_out()
     {
         var processing = new ProcessingViewModel(TimeSpan.FromMilliseconds(100), TimeSpan.FromMilliseconds(100));
-        var media = new AnalysingPreview { Progress = 0.1, Stage = "Reading the audio" };
+        var media = new AnalysingPreview { Progress = 0.1, Stage = "Finding keyframes" };
 
         processing.Track(media, "interview-final.mp4", "interview-final.mp4 · 1080p · 30 fps", 3734);
         Assert.False(processing.IsVisible);
@@ -86,12 +86,12 @@ public sealed class ProcessingScreenTests
         Assert.True(processing.IsShown);
         Assert.Equal("interview-final.mp4", processing.FileName);
         Assert.Equal("1:02:14 · 1080p · 30 fps", processing.Details);
-        Assert.Equal("Reading the audio · 10% · estimating time left", processing.Status);
+        Assert.Equal("Finding keyframes · 10% · estimating time left", processing.Status);
 
         await Task.Delay(600, Ct);
         media.Progress = 0.72;
         processing.Update();
-        Assert.Matches(@"^Reading the audio · 72% · (about \d+ s left|almost done)$", processing.Status);
+        Assert.Matches(@"^Finding keyframes · 72% · (about \d+ s left|almost done)$", processing.Status);
         Assert.Equal(0.72 * ProcessingViewModel.ProgressLength, processing.ProgressWidth, 6);
 
         media.Finish();
@@ -107,7 +107,7 @@ public sealed class ProcessingScreenTests
     [AvaloniaFact]
     public async Task The_screen_covers_the_editor_below_the_title_bar()
     {
-        var media = new AnalysingPreview { Progress = 0.72, Stage = "Reading the audio" };
+        var media = new AnalysingPreview { Progress = 0.72, Stage = "Finding keyframes" };
         var editor = App.CreateEditor(null, new AnalysingOpener(media));
         var window = new MainWindow { DataContext = editor, Width = 1440, Height = 900 };
         window.Show();

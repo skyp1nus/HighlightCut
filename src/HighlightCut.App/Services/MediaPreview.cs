@@ -177,8 +177,10 @@ public sealed class MediaPreview : IMediaPreview, IDisposable
 
     /// <summary>
     /// Completes when the file is open: the cached scenes are read and whatever the chips asked for as it opened (keyframes,
-    /// waveform, thumbnails) is read, failed or stopped. Nothing asked for, it completes at once. Scene detection
-    /// (<see cref="ScenesTask"/>), transcription and whatever is asked for later run on their own.
+    /// thumbnails) is read, failed or stopped. Nothing asked for, it completes at once. The waveform
+    /// (<see cref="WaveformTask"/>) is never part of it: the Waveform chip is on by default and the audio fills in while
+    /// the video plays. Scene detection (<see cref="ScenesTask"/>), transcription and whatever is asked for later run on
+    /// their own.
     /// </summary>
     public Task Analysis { get; private set; } = Task.CompletedTask;
 
@@ -194,7 +196,7 @@ public sealed class MediaPreview : IMediaPreview, IDisposable
         }
     }
 
-    /// <summary>Progress 0..1 of what was asked for as the file opened (keyframes, waveform and thumbnails weigh the same).</summary>
+    /// <summary>Progress 0..1 of what was asked for as the file opened (keyframes and thumbnails weigh the same).</summary>
     public double Progress => Parts() is { Count: > 0 } parts ? parts.Average(p => p.Done) : 1;
 
     /// <summary>The file is opening and something asked for with it is still being read (the processing screen shows).</summary>
@@ -205,10 +207,13 @@ public sealed class MediaPreview : IMediaPreview, IDisposable
     public string? AnalysisStage => !_analysing ? null
         : Parts().Where(p => p.Done < 1).OrderBy(p => p.Done).Select(p => p.Name).FirstOrDefault() ?? "Finishing";
 
-    /// <summary>Each part of the analysis asked for, with how far it is, 0..1.</summary>
+    /// <summary>
+    /// Each part of the opening analysis asked for, with how far it is, 0..1. Not the waveform: it is read in the
+    /// background (status bar: "reading the audio 40%") and never holds up the player.
+    /// </summary>
     private List<(string Name, double Done)> Parts()
     {
-        var parts = new List<(string, double)>(3);
+        var parts = new List<(string, double)>(2);
         if (Info.Video is not null)
         {
             if (KeyframesRequested)
@@ -216,16 +221,11 @@ public sealed class MediaPreview : IMediaPreview, IDisposable
             if (ThumbnailsRequested)
                 parts.Add(("Making thumbnails for the video track", ThumbnailProgress));
         }
-        if (Info.Audio.Length > 0 && WaveformRequested)
-            parts.Add((WaveformStage, WaveformProgress));
         return parts;
     }
 
     /// <summary>What the keyframe scan is for, in the processing screen and the export dialog.</summary>
     public const string KeyframesStage = "Finding keyframes (where clips can be cut without re-encoding)";
-
-    /// <summary>What reading the waveform is for, in the processing screen.</summary>
-    public const string WaveformStage = "Reading the audio (for the waveform and silences)";
 
     /// <summary>Keyframes scanned so far, 0..1.</summary>
     public double KeyframeProgress => KeyframesComplete ? 1 : Volatile.Read(ref _keyframeProgress);
@@ -574,7 +574,7 @@ public sealed class MediaPreview : IMediaPreview, IDisposable
         try
         {
             await Guard(() => Task.Run(LoadCachedScenes, ct)).ConfigureAwait(false);
-            // What the chips asked for as the file opened (keyframes, waveform, thumbnails) is part of opening it; stopped,
+            // What the chips asked for as the file opened (keyframes, thumbnails) is part of opening it; stopped,
             // it ends at once. The editor asks on the UI thread as it loads the file, so this looks once that is through.
             await Guard(async () =>
             {
@@ -591,7 +591,7 @@ public sealed class MediaPreview : IMediaPreview, IDisposable
         }
     }
 
-    private IEnumerable<Task> OpeningReads() => [_keyframesRead.Task, _waveformRead.Task, Volatile.Read(ref _thumbnailsTask)];
+    private IEnumerable<Task> OpeningReads() => [_keyframesRead.Task, Volatile.Read(ref _thumbnailsTask)];
 
     /// <summary>Scene changes found when the file was open before: shown, though nobody asked this time.</summary>
     private void LoadCachedScenes()
