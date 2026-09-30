@@ -643,16 +643,17 @@ public sealed class WelcomeTourTests : IDisposable
         var chips = Part<WrapPanel>(view, "Chips").Children.OfType<Border>().ToList();
         Assert.Equal(["Frames", "Keyframes", "Waveform", "Silence", "Scenes", "Transcript", "Snap"],
             chips.Select(c => c.GetVisualDescendants().OfType<TextBlock>().Last().Text));
-        // As on a first start: only Snap is on.
-        Assert.Equal(["Snap"], chips.Where(c => c.Classes.Contains("on")).Select(c => c.GetVisualDescendants().OfType<TextBlock>().Last().Text));
+        // As on a first start: Waveform and Snap are on.
+        Assert.Equal(["Waveform", "Snap"], chips.Where(c => c.Classes.Contains("on")).Select(c => c.GetVisualDescendants().OfType<TextBlock>().Last().Text));
         var defaults = new TimelineSettings();
-        Assert.Equal((false, false, false, false, false, true),
+        Assert.Equal((false, false, true, false, false, true),
             (defaults.Frames, defaults.Keyframes, defaults.Waveform, defaults.Silences, defaults.Scenes, defaults.Snap));
         Assert.False(AppSettings.Default.Transcription.TranscribeOnOpen);
 
         string text = Part<TextBlock>(view, "ChipsText").Text!;
         Assert.Contains("runs only while the chip is on", text, StringComparison.Ordinal);
         Assert.Contains("lossless export reads the keyframes", text, StringComparison.Ordinal);
+        Assert.Contains("Waveform and Snap start on", text, StringComparison.Ordinal);
         // Fits the step without scrolling at the design size.
         var scroll = Part<ScrollViewer>(view, "StepScroll");
         Assert.True(scroll.Extent.Height <= scroll.Viewport.Height + 0.5, $"{scroll.Extent.Height} > {scroll.Viewport.Height}");

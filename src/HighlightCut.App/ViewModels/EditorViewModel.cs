@@ -352,14 +352,15 @@ public sealed partial class EditorViewModel : ViewModelBase
     public bool IsSelectTool => Tool == TimelineTool.Select;
     public bool IsSplitTool => Tool == TimelineTool.Split;
 
-    // Marker layers on the timeline (toolbar chips). What a chip shows is worked out only while it is on, so with them off
-    // (the settings' defaults) opening a video reads nothing but its header. They start on for the design's screens.
+    // Marker layers on the timeline (toolbar chips). What a chip shows is worked out only while it is on. By default only
+    // Waveform (and Snap) is: its audio is read in the background, so opening a video still reads nothing but its header
+    // before it plays. They start on for the design's screens.
 
     /// <summary>Keyframe ticks; while on, keyframes are scanned in every video opened (trims then snap to them).</summary>
     [ObservableProperty]
     public partial bool ShowKeyframes { get; set; } = true;
 
-    /// <summary>The audio waveform; while on, the audio of every video opened is read.</summary>
+    /// <summary>The audio waveform; while on (the default), the audio of every video opened is read in the background.</summary>
     [ObservableProperty]
     public partial bool ShowWaveform { get; set; } = true;
 
@@ -397,7 +398,7 @@ public sealed partial class EditorViewModel : ViewModelBase
         : !media.KeyframesComplete ? "Finding keyframes…"
         : $"Keyframes: {media.Keyframes.Count}. A lossless export starts each clip on one; trims snap to them";
 
-    public string WaveformTip => !ShowWaveform ? "Show the audio waveform (reading it goes through all the audio once)"
+    public string WaveformTip => !ShowWaveform ? "Show the audio waveform: where it gets loud or goes quiet (the audio is read while the video plays)"
         : Media is not { } media ? "Audio waveform: read in every video you open"
         : media.AudioStreamCount == 0 ? "No audio in this file"
         : media.SilencesComplete ? "Audio waveform: how loud each track is over time"
@@ -692,7 +693,8 @@ public sealed partial class EditorViewModel : ViewModelBase
             StartTranscription();
         else
             LoadCachedTranscript();
-        // Only what the chips show is read; with them all off the file is ready as soon as it is probed.
+        // Only what the chips show is read; the processing screen waits for the keyframes and thumbnails, while the audio
+        // (the Waveform and Silence chips) fills in in the background, so with the default chips the file plays at once.
         if (ShowKeyframes)
             media.ScanKeyframes();
         if (ShowWaveform || ShowSilences)

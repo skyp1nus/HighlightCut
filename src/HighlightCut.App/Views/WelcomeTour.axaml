@@ -66,7 +66,7 @@
           <Grid Grid.Column="1" RowDefinitions="*,Auto">
             <ScrollViewer Name="StepScroll" HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
               <Panel Name="StepContent">
-              <!-- 1 · Open & cut: a sample timeline with its chips (all off but Snap, as on a first start), one clip left out. -->
+              <!-- 1 · Open & cut: a sample timeline with its chips (Waveform and Snap on, as on a first start), one clip left out. -->
               <StackPanel Name="OpenAndCutStep" Spacing="10" IsVisible="{Binding IsOpenAndCut}">
                 <TextBlock Classes="heading" Text="Cut without re-encoding" />
                 <TextBlock Classes="body"
@@ -92,7 +92,7 @@
                           <TextBlock Text="Keyframes" />
                         </StackPanel>
                       </Border>
-                      <Border Classes="chip" ToolTip.Tip="The audio waveform, read while this is on">
+                      <Border Classes="chip on" ToolTip.Tip="The audio waveform: loud and quiet moments at a glance, read while the video plays">
                         <StackPanel Orientation="Horizontal" Spacing="6">
                           <Border Classes="swatch" ClipToBounds="True">
                             <StackPanel Orientation="Horizontal" Spacing="1" VerticalAlignment="Center" HorizontalAlignment="Center">
@@ -173,7 +173,7 @@
                   </StackPanel>
                 </Border>
                 <TextBlock Name="ChipsText" Classes="small" Margin="0,4,0,0"
-                           Text="Each chip above the timeline shows one analysis of the video, and that analysis runs only while the chip is on. All but Snap start off, so a video opens and plays at once. What needs the data reads it when you use it: a lossless export reads the keyframes, evening out volumes reads the audio." />
+                           Text="Each chip above the timeline shows one analysis of the video, and that analysis runs only while the chip is on. Waveform and Snap start on and the heavier ones off, so a video plays at once while its waveform fills in. What needs the data reads it when you use it: a lossless export reads the keyframes." />
               </StackPanel>
 
               <!-- 2 · Shortcuts: six keys from Settings → Keyboard. -->
@@ -476,7 +476,7 @@
       <Setter Property="Foreground" Value="{StaticResource Muted3Brush}" />
     </Style>
 
-    <!-- The timeline toolbar's chips (TimelinePanel's Button.chip), drawn as pills: dim while off, Snap on. -->
+    <!-- The timeline toolbar's chips (TimelinePanel's Button.chip), drawn as pills: dim while off, Waveform and Snap on. -->
     <Style Selector="Border.chip">
       <Setter Property="Height" Value="24" />
       <Setter Property="Padding" Value="8,0" />

@@ -14,6 +14,7 @@ See [docs/releasing.md](docs/releasing.md).
 - The welcome tour works from the keyboard (Enter, the arrow keys, Tab stays in the dialog) and fits smaller windows.
 - Connect Claude, in the welcome tour and Settings → MCP server, adds HighlightCut to Claude Code and Claude Desktop in one click. It replaces an old or moved entry, and says clearly when Claude Code isn’t installed.
 - Adding to Claude Desktop keeps your other servers and settings and saves a backup of the old file.
+- The waveform is on by default, so you can see loud and quiet moments right away; turn it off with its chip. The video still plays at once while the waveform fills in.
 
 ## 0.1.0 — 2026-09-30
 

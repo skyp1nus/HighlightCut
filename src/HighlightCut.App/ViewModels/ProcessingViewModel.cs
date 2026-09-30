@@ -8,7 +8,8 @@ namespace HighlightCut.App.ViewModels;
 
 /// <summary>
 /// The processing screen over the editor while what the timeline chips show is read from a file being opened: its
-/// keyframes, thumbnails and waveform (the "blob" design, X1). With those chips off nothing is read and it never shows.
+/// keyframes and thumbnails (the "blob" design, X1). With those chips off it never shows; the waveform is read in the
+/// background and never brings it up.
 /// It fades in only when the reading takes longer than <see cref="ShowAfter"/>, so a file read from the cache never
 /// flashes it, says what is being read and what for and about how long is left, and fades out when the editor is ready.
 /// </summary>
@@ -66,7 +67,7 @@ public sealed partial class ProcessingViewModel : ViewModelBase
 
     public double ProgressWidth => ProgressLength * Math.Clamp(Progress, 0, 1);
 
-    /// <summary>"Reading the audio (for the waveform and silences) · 72% · about 8 s left".</summary>
+    /// <summary>"Finding keyframes (where clips can be cut without re-encoding) · 72% · about 8 s left".</summary>
     [ObservableProperty]
     public partial string Status { get; private set; } = "";
 

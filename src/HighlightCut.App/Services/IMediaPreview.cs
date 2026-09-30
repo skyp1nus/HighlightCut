@@ -163,7 +163,10 @@ public interface IMediaPreview
     /// <summary>How far that reading is, 0..1.</summary>
     double AnalysisProgress => 1;
 
-    /// <summary>The part the reading waits on most, e.g. "Reading the audio (for the waveform and silences)"; null when it is done.</summary>
+    /// <summary>
+    /// The part the reading waits on most, e.g. "Finding keyframes (where clips can be cut without re-encoding)"; null when
+    /// it is done.
+    /// </summary>
     string? AnalysisStage => null;
 
     /// <summary>

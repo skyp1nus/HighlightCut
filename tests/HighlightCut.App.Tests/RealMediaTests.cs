@@ -98,8 +98,11 @@ public sealed class RealMediaTests : IDisposable
         Assert.Equal([(1.5, 3.2), (4.0, 5.5)], editor.Clips.Select(c => (c.Start, c.End)));
     }
 
-    /// <summary>The chips that read something from the file, all on (off by default).</summary>
+    /// <summary>The chips that read something from the file, all on (only Waveform is by default).</summary>
     private static void AllChips(EditorViewModel e) => e.ShowKeyframes = e.ShowWaveform = e.ShowSilences = e.ShowFrames = true;
+
+    /// <summary>Every chip that reads something from the file off, the Waveform chip too (on by default).</summary>
+    private static void NoChips(EditorViewModel e) => e.ShowWaveform = false;
 
     [AvaloniaFact]
     public async Task Opening_a_video_fills_the_timeline_from_ffmpeg()
@@ -107,6 +110,8 @@ public sealed class RealMediaTests : IDisposable
         string video = await SampleAsync();
         var (editor, window) = await OpenAsync(video, AllChips);
         var preview = (MediaPreview)editor.Media!;
+        // The audio is not part of opening the file: it fills in while the video plays.
+        await preview.WaveformTask.WaitAsync(TimeSpan.FromSeconds(60), Ct);
 
         Assert.Equal("sample", editor.ProjectName);
         Assert.Equal("sample.mp4 · 320×180 · 30 fps", editor.MediaInfo);
@@ -347,7 +352,7 @@ public sealed class RealMediaTests : IDisposable
     public async Task Thumbnails_are_made_only_while_the_Frames_chip_is_on()
     {
         string video = await SampleAsync();
-        var (editor, window) = await OpenAsync(video);
+        var (editor, window) = await OpenAsync(video, NoChips);
         var preview = (MediaPreview)editor.Media!;
 
         // Off (the default): none are made.
@@ -375,7 +380,7 @@ public sealed class RealMediaTests : IDisposable
         window.Close();
 
         // The next open with the chip on reads them from the cache.
-        var (again, w2) = await OpenAsync(video, e => e.ShowFrames = true);
+        var (again, w2) = await OpenAsync(video, e => (e.ShowFrames, e.ShowWaveform) = (true, false));
         var b = (MediaPreview)again.Media!;
         Assert.Equal(3, b.ThumbnailCount);
         Assert.Contains("thumbnails cached", b.AnalysisTimes, StringComparison.Ordinal);
@@ -386,7 +391,7 @@ public sealed class RealMediaTests : IDisposable
     public async Task Turning_the_Frames_chip_off_stops_the_thumbnails_and_keeps_nothing_of_them()
     {
         string video = await SampleAsync();
-        var (editor, window) = await OpenAsync(video);
+        var (editor, window) = await OpenAsync(video, NoChips);
         var preview = (MediaPreview)editor.Media!;
         editor.ToggleFramesCommand.Execute(null);
         Assert.True(preview.ThumbnailsRequested);
@@ -431,24 +436,28 @@ public sealed class RealMediaTests : IDisposable
     }
 
     [AvaloniaFact]
-    public async Task Opening_a_video_reads_nothing_until_a_chip_asks()
+    public async Task Opening_a_video_reads_only_its_audio_and_in_the_background()
     {
         string video = await SampleAsync();
         var (editor, window) = await OpenAsync(video);
         var preview = (MediaPreview)editor.Media!;
 
-        // The chips that read the file are off by default: nothing is scanned or read, and no processing screen shows.
-        Assert.False(editor.ShowKeyframes || editor.ShowWaveform || editor.ShowSilences || editor.ShowFrames || editor.ShowScenes);
+        // Of the chips that read the file only Waveform is on by default. The audio is read in the background: the file is
+        // open at once, no processing screen shows, and nothing else is scanned or read.
+        Assert.True(editor.ShowWaveform);
+        Assert.False(editor.ShowKeyframes || editor.ShowSilences || editor.ShowFrames || editor.ShowScenes);
         Assert.True(preview.Analysis.IsCompleted);
         Assert.False(preview.IsAnalysing);
         Assert.False(editor.Processing.IsVisible);
+        Assert.True(preview.WaveformRequested);
         Assert.Empty(preview.Keyframes);
-        Assert.Equal(0, preview.Waveform.Decoded);
-        Assert.Null(preview.AnalysisTimes);
-        Assert.Null(preview.Activity);
-        Assert.Contains("Timeline chips keyframes off · waveform off · silence off · scenes off · frames off",
+        Assert.Contains("Timeline chips keyframes off · waveform on · silence off · scenes off · frames off",
             editor.Settings.DiagnosticsText(), StringComparison.Ordinal);
         Assert.StartsWith("Snap trims to keyframes (turn on Keyframes to find them).", editor.SnapTip, StringComparison.Ordinal);
+        await preview.WaveformTask.WaitAsync(TimeSpan.FromSeconds(60), Ct);
+        await PumpUntil(() => preview.Waveform.IsComplete && preview.Activity is null);
+        Assert.Matches(@"^waveform \d+\.\d s$", preview.AnalysisTimes);
+        Assert.False(editor.Processing.IsVisible);
 
         // Keyframes on: scanned, shown and snapped to, without the processing screen.
         editor.ToggleKeyframesCommand.Execute(null);
@@ -456,14 +465,12 @@ public sealed class RealMediaTests : IDisposable
         Assert.StartsWith("finding keyframes ", preview.Activity, StringComparison.Ordinal);
         await preview.KeyframesTask.WaitAsync(TimeSpan.FromSeconds(60), Ct);
         await PumpUntil(() => editor.Session.Keyframes.Count == 6);
-        Assert.Matches(@"^keyframes \d+\.\d s$", preview.AnalysisTimes);
+        Assert.Matches(@"^keyframes \d+\.\d s · waveform \d+\.\d s$", preview.AnalysisTimes);
         Assert.Equal("Keyframes: 6. A lossless export starts each clip on one; trims snap to them", editor.KeyframesTip);
 
-        // Waveform on: all the audio is read; Silence on as well reads nothing more.
-        editor.ToggleWaveformCommand.Execute(null);
+        // Silence on as well reads nothing more: the pauses are found in the waveform already read.
         editor.ToggleSilencesCommand.Execute(null);
-        await preview.WaveformTask.WaitAsync(TimeSpan.FromSeconds(60), Ct);
-        await PumpUntil(() => preview.Waveform.IsComplete && editor.SilenceTip == "No pauses of a second or more in this file");
+        await PumpUntil(() => editor.SilenceTip == "No pauses of a second or more in this file");
         Assert.Matches(@"^keyframes \d+\.\d s · waveform \d+\.\d s$", preview.AnalysisTimes);
         Assert.False(editor.Processing.IsVisible);
 
@@ -480,7 +487,7 @@ public sealed class RealMediaTests : IDisposable
     public async Task Turning_the_Keyframes_and_Waveform_chips_off_stops_the_reads_and_keeps_nothing_of_them()
     {
         string video = await SampleAsync();
-        var (editor, window) = await OpenAsync(video);
+        var (editor, window) = await OpenAsync(video, NoChips);
         var preview = (MediaPreview)editor.Media!;
 
         editor.ToggleKeyframesCommand.Execute(null);
@@ -505,9 +512,10 @@ public sealed class RealMediaTests : IDisposable
         Assert.Matches(@"^keyframes \d+\.\d s · waveform \d+\.\d s$", preview.AnalysisTimes);
         window.Close();
 
-        // Opened again with the chips on, both come from the cache, as the file opens.
+        // Opened again with the chips on, both come from the cache.
         var (again, w2) = await OpenAsync(video, e => e.ShowKeyframes = e.ShowWaveform = true);
         var b = (MediaPreview)again.Media!;
+        await b.WaveformTask.WaitAsync(TimeSpan.FromSeconds(60), Ct);
         Assert.Equal("keyframes cached · waveform cached", b.AnalysisTimes);
         Assert.Equal(6, again.Session.Keyframes.Count);
         w2.Close();
@@ -517,7 +525,7 @@ public sealed class RealMediaTests : IDisposable
     public async Task Features_that_need_keyframes_or_the_audio_read_them_when_asked()
     {
         string video = await SampleAsync();
-        var (editor, window) = await OpenAsync(video);
+        var (editor, window) = await OpenAsync(video, NoChips);
         var preview = (MediaPreview)editor.Media!;
         var tools = new HighlightCut.Mcp.EditorTools(new EditorMcpHost(editor));
         Assert.Null(preview.AnalysisTimes);
@@ -537,7 +545,7 @@ public sealed class RealMediaTests : IDisposable
         window.Close();
 
         // Evening out the volumes reads the audio of a file opened without it.
-        var (other, w2) = await OpenAsync(video);
+        var (other, w2) = await OpenAsync(video, NoChips);
         var b = (MediaPreview)other.Media!;
         Assert.Equal(0, b.Waveform.Decoded);
         other.AudioLanes[1].GainDb = -6;
