@@ -124,10 +124,10 @@ public class ClipMagnetTests
     public void Free_range_starts_after_a_covering_clip_and_stops_at_the_next()
     {
         var p = Sample.Project;
-        Assert.Equal(new TimeRange(45.32, 100), p.FreeRange(30, 100));
-        Assert.Equal(new TimeRange(45.32, 118.6), p.FreeRange(30, 300));
-        Assert.Equal(new TimeRange(0, 12.04), p.FreeRange(0, 20));
-        Assert.Null(p.FreeRange(13, 40));
+        Assert.Equal(new TimeRange(45.32, 100), p.FreeRange(1, 30, 100));
+        Assert.Equal(new TimeRange(45.32, 118.6), p.FreeRange(1, 30, 300));
+        Assert.Equal(new TimeRange(0, 12.04), p.FreeRange(1, 0, 20));
+        Assert.Null(p.FreeRange(1, 13, 40));
     }
 
     [Fact]
@@ -135,7 +135,7 @@ public class ClipMagnetTests
     {
         var s = Open();
         s.Split(3, 300);
-        s.Execute(new CutRangesCommand([new TimeRange(20, 25), new TimeRange(150, 160)]));
+        s.Execute(new CutRangesCommand([new SourceRange(1, 20, 25), new SourceRange(1, 150, 160)]));
         Assert.Empty(s.Project.Overlaps());
     }
 

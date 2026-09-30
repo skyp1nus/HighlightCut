@@ -100,7 +100,7 @@ public sealed class MediaOpeningTests : IDisposable
         var editor = App.CreateEditor(null, opener);
         string video = NewFile("keynote_final_4k.mp4");
         string projectPath = Path.Combine(_dir, "keynote" + ProjectFile.Extension);
-        await ProjectFile.SaveAsync(DesignSample.Project with { Source = DesignSample.Source with { Path = video } }, projectPath,
+        await ProjectFile.SaveAsync(DesignSample.Project with { Sources = [DesignSample.Source with { Path = video }] }, projectPath,
             TestContext.Current.CancellationToken);
 
         await editor.OpenPath(projectPath);
@@ -117,7 +117,7 @@ public sealed class MediaOpeningTests : IDisposable
         var editor = App.CreateEditor(null, opener);
         string video = NewFile("keynote_final_4k.mp4");
         string projectPath = Path.Combine(_dir, "keynote" + ProjectFile.LegacyExtension);
-        await ProjectFile.SaveAsync(DesignSample.Project with { Source = DesignSample.Source with { Path = video } }, projectPath,
+        await ProjectFile.SaveAsync(DesignSample.Project with { Sources = [DesignSample.Source with { Path = video }] }, projectPath,
             TestContext.Current.CancellationToken);
         File.WriteAllText(projectPath, File.ReadAllText(projectPath).Replace(ProjectFile.FormatName, ProjectFile.LegacyFormatName, StringComparison.Ordinal));
 
@@ -136,7 +136,7 @@ public sealed class MediaOpeningTests : IDisposable
     {
         var editor = App.CreateEditor(null, new SampleOpener());
         string projectPath = Path.Combine(_dir, "old" + ProjectFile.Extension);
-        await ProjectFile.SaveAsync(DesignSample.Project with { Source = DesignSample.Source with { Path = Path.Combine(_dir, "missing.mp4") } },
+        await ProjectFile.SaveAsync(DesignSample.Project with { Sources = [DesignSample.Source with { Path = Path.Combine(_dir, "missing.mp4") }] },
             projectPath, TestContext.Current.CancellationToken);
 
         await editor.OpenProjectFileAsync(projectPath);

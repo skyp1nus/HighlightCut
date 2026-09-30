@@ -73,6 +73,9 @@ public static partial class ExportPlanner
         fileExists ??= File.Exists;
         if (settings.Mode == CutMode.SmartCut)
             throw new InvalidOperationException("Smart cut is not available yet.");
+        // Every step cuts from one file, the project's first video; joining several videos comes with their export.
+        if (project.Sources.Count > 1)
+            throw new InvalidOperationException("Exporting a project with several videos is not available yet.");
         // The included clips, less any seconds an earlier clip already exports (only projects saved with overlapping clips).
         var parts = project.OutputParts();
         if (parts.Count == 0)

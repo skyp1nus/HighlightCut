@@ -22,17 +22,19 @@ public sealed partial class EditorViewModel
     /// </summary>
     public TimeSpan VolumeApplyDelay { get; set; } = TimeSpan.FromMilliseconds(250);
 
-    /// <summary>One lane per audio stream of the project's source, with the mix the project has for it.</summary>
+    /// <summary>One lane per audio stream of the project's video, with the mix the project has for it.</summary>
     private void CreateAudioLanes(Project project)
     {
         _volumeTimer?.Stop();
         AudioLanes.Clear();
         var tracks = project.Source?.AudioTracks ?? [];
+        int sourceId = project.Source?.Id ?? SourceMedia.FirstId;
         for (int i = 0; i < tracks.Length; i++)
         {
-            var mix = project.MixOf(tracks[i].Index);
+            var mix = project.MixOf(sourceId, tracks[i].Index);
             var lane = new AudioLaneViewModel(i, tracks[i].Index, "A" + (i + 1).ToString(CultureInfo.InvariantCulture), tracks[i].Label)
             {
+                SourceId = sourceId,
                 IsMuted = mix.IsMuted,
                 GainDb = mix.GainDb,
                 EvenOutCommand = EvenOutVolumesCommand,
@@ -70,7 +72,7 @@ public sealed partial class EditorViewModel
         {
             foreach (var lane in AudioLanes)
             {
-                var mix = project.MixOf(lane.Index);
+                var mix = project.MixOf(lane.SourceId, lane.Index);
                 lane.IsMuted = mix.IsMuted;
                 lane.GainDb = mix.GainDb;
             }

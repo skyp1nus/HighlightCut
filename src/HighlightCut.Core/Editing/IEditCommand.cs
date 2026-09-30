@@ -47,30 +47,37 @@ public static class EditRules
     /// <summary>"Join with next" also closes a gap up to this long, in seconds (a few frames missed while trimming).</summary>
     public const double JoinGap = 0.5;
 
-    public static void ValidateRange(Project project, double start, double end)
+    /// <summary>
+    /// Throws unless <paramref name="start"/>–<paramref name="end"/> is a valid clip range on video
+    /// <paramref name="sourceId"/>: finite, inside the video and at least <see cref="MinClipDuration"/> long.
+    /// </summary>
+    public static void ValidateRange(Project project, int sourceId, double start, double end)
     {
         if (double.IsNaN(start) || double.IsNaN(end) || double.IsInfinity(start) || double.IsInfinity(end))
             throw new EditException("Clip times must be finite numbers.");
+        // A project without videos (the empty project, tests) has no end to check against.
+        var source = project.Sources.IsEmpty ? null : project.GetSource(sourceId);
+        string video = project.Sources.Count > 1 ? $"video {project.SourceNumberOf(sourceId)}" : "the source";
         if (start < -Epsilon)
-            throw new EditException($"In-point {start:0.###} s is before the start of the source.");
-        if (project.Source is { } source && end > source.Duration + Epsilon)
-            throw new EditException($"Out-point {end:0.###} s is after the end of the source ({source.Duration:0.###} s).");
+            throw new EditException($"In-point {start:0.###} s is before the start of {video}.");
+        if (source is not null && end > source.Duration + Epsilon)
+            throw new EditException($"Out-point {end:0.###} s is after the end of {video} ({source.Duration:0.###} s).");
         if (end - start < MinClipDuration - Epsilon)
             throw new EditException($"Clips must be at least {MinClipDuration} s long.");
     }
 
     /// <summary>
-    /// Throws when <paramref name="start"/>–<paramref name="end"/> shares time with a clip other than
+    /// Throws when <paramref name="start"/>–<paramref name="end"/> on a video shares time with a clip other than
     /// <paramref name="exceptId"/>: two clips over the same seconds would put them in the export twice.
     /// </summary>
-    public static void ValidateFree(Project project, double start, double end, int? exceptId = null)
+    public static void ValidateFree(Project project, int sourceId, double start, double end, int? exceptId = null)
     {
-        if (project.FirstOverlapping(start, end, exceptId) is { } other)
+        if (project.FirstOverlapping(sourceId, start, end, exceptId) is { } other)
             throw OverlapError(project, start, end, other);
     }
 
     /// <summary>
-    /// Throws when <paramref name="after"/> has more source time covered by two clips than <paramref name="before"/>.
+    /// Throws when <paramref name="after"/> has more video time covered by two clips than <paramref name="before"/>.
     /// Every edit goes through this check, so no edit adds an overlap; overlaps a project was saved with can only shrink.
     /// </summary>
     public static void ValidateNoNewOverlap(Project before, Project after)
@@ -89,8 +96,24 @@ public static class EditRules
         throw OverlapError(after, moved.Start, moved.End, other);
     }
 
-    internal static EditException OverlapError(Project project, double start, double end, Clip other) =>
-        new($"{TimeFormat.MinutesSeconds(start)} – {TimeFormat.MinutesSeconds(end)} overlaps clip {project.NumberOf(other.Id)} " +
-            $"({TimeFormat.MinutesSeconds(other.Start)} – {TimeFormat.MinutesSeconds(other.End)}). Clips cannot share source time: " +
-            "those seconds would be in the export twice.");
+    /// <summary>
+    /// Throws when a clip of <paramref name="project"/> is cut from a video the project does not have. Every edit goes
+    /// through this check, so a video cannot go while it still has clips (e.g. reverting the edit that added it).
+    /// </summary>
+    public static void ValidateClipSources(Project project)
+    {
+        if (project.Sources.IsEmpty || project.Clips.FirstOrDefault(c => project.FindSource(c.SourceId) is null) is not { } orphan)
+            return;
+        throw new EditException($"Clip {project.NumberOf(orphan.Id)} would be left without its video.");
+    }
+
+    /// <summary>A clip range on a video and the clip it runs into, with both shown as the timeline shows them.</summary>
+    internal static EditException OverlapError(Project project, double start, double end, Clip other)
+    {
+        double offset = project.FindSource(other.SourceId) is null ? 0 : project.OffsetOf(other.SourceId);
+        return new($"{TimeFormat.MinutesSeconds(offset + start)} – {TimeFormat.MinutesSeconds(offset + end)} overlaps clip " +
+                   $"{project.NumberOf(other.Id)} ({TimeFormat.MinutesSeconds(offset + other.Start)} – " +
+                   $"{TimeFormat.MinutesSeconds(offset + other.End)}). Clips cannot share source time: those seconds would be in " +
+                   "the export twice.");
+    }
 }

@@ -265,7 +265,7 @@ public sealed partial class EditorViewModel : ViewModelBase
     public string ProjectName => Session.Project.Name;
     public bool HasFile => Media is not null && Session.Project.Source is not null;
     public bool IsEmpty => !HasFile;
-    public double Duration => HasFile ? Session.Project.SourceDuration : PlaceholderDuration;
+    public double Duration => HasFile ? Session.Project.TimelineDuration : PlaceholderDuration;
     public double FrameRate => Session.Project.Source?.FrameRate is > 0 and var fps ? fps : 30;
     public string DurationText => TimeFormat.Timecode(Duration);
 
@@ -703,7 +703,7 @@ public sealed partial class EditorViewModel : ViewModelBase
             media.DetectScenes();
         if (ShowFrames)
             media.ExtractThumbnails();
-        Processing.Track(IsDemo ? null : media, MediaFileName, info, project.SourceDuration);
+        Processing.Track(IsDemo ? null : media, MediaFileName, info, project.TimelineDuration);
         // Saved before clips were kept apart: the export already plays each second once; say how to tidy the clips up.
         if (project.Overlaps() is [var (first, second), ..])
         {
@@ -922,12 +922,18 @@ public sealed partial class EditorViewModel : ViewModelBase
             OpenFailed("The project has no source video.");
             return;
         }
+        // Projects with several videos open once the timeline and the player can show them (see docs/architecture.md).
+        if (project.Sources.Count > 1)
+        {
+            OpenFailed($"The project has {project.Sources.Count} videos; this version of HighlightCut opens projects with one video.");
+            return;
+        }
         var media = await OpenSourceAsync(project.Source.Path).ConfigureAwait(true);
         if (media is null)
             return;
         LeaveDemo();
         // The probe is the truth about the file (it may have been re-encoded since); the clips are kept.
-        LoadProject(project with { Source = media.Source }, media.Preview, media.Summary, path);
+        LoadProject(project.WithSource(media.Source with { Id = project.Source.Id }), media.Preview, media.Summary, path);
         _openedPath = path;
         Remember(path, media.Source.Duration);
     }
@@ -1259,13 +1265,16 @@ public sealed partial class EditorViewModel : ViewModelBase
         }
         TryEdit(() =>
         {
-            // Up to 10 s, and not into the next clip: clips never share source time.
+            // Up to 10 s, and not into the next clip or video: clips never share source time.
             var project = Session.Project;
-            if (project.FirstOverlapping(Time, Time + EditRules.MinClipDuration) is { } under)
+            if (project.ToSource(Time) is not { } at)
+                return;
+            double videoEnd = project.GetSource(at.SourceId).Duration;
+            if (project.FirstOverlapping(at.SourceId, at.Time, at.Time + EditRules.MinClipDuration) is { } under)
                 throw new EditException($"The playhead is in clip {project.NumberOf(under.Id)}; select it to move its in-point.");
-            var free = project.FreeRange(Time, Math.Min(Duration, Time + 10))
+            var free = project.FreeRange(at.SourceId, at.Time, Math.Min(videoEnd, at.Time + 10))
                        ?? throw new EditException($"There is less than {EditRules.MinClipDuration} s before the next clip.");
-            var clip = Session.AddClip(free.Start, free.End);
+            var clip = Session.AddClip(project.ToTimeline(at.SourceId, free.Start), project.ToTimeline(at.SourceId, free.End));
             Select(Find(clip.Id));
         });
     }

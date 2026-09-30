@@ -32,7 +32,7 @@ public class AudioVolumeTests
         editor.AudioLanes[1].GainDb = -6;
 
         Assert.Equal(["tracks 11 gains 0,-6"], player.Calls);
-        Assert.Equal(new TrackMix(2, -6), editor.Session.Project.MixOf(2));
+        Assert.Equal(new TrackMix(2, -6), editor.Session.Project.MixOf(1, 2));
         Assert.True(editor.IsDirty);
         Assert.False(editor.CanUndo);
     }
@@ -47,7 +47,7 @@ public class AudioVolumeTests
         editor.AudioLanes[0].ToggleMuteCommand.Execute(null);
 
         Assert.Equal(["tracks 01 gains 0,-6"], player.Calls);
-        Assert.True(editor.Session.Project.MixOf(1).IsMuted);
+        Assert.True(editor.Session.Project.MixOf(1, 1).IsMuted);
     }
 
     [AvaloniaFact]

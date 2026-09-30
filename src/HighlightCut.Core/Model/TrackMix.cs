@@ -7,7 +7,8 @@ namespace HighlightCut.Core.Model;
 /// <param name="Index">Stream index in the container, as <see cref="AudioTrack.Index"/>.</param>
 /// <param name="GainDb">Volume change in dB, <see cref="MinGainDb"/> (silent) to <see cref="MaxGainDb"/>.</param>
 /// <param name="IsMuted">Left out of the preview, and of the export when it keeps only unmuted tracks.</param>
-public sealed record TrackMix(int Index, double GainDb = 0, bool IsMuted = false)
+/// <param name="SourceId">The video the track belongs to (<see cref="SourceMedia.Id"/>): each video has its own tracks.</param>
+public sealed record TrackMix(int Index, double GainDb = 0, bool IsMuted = false, int SourceId = SourceMedia.FirstId)
 {
     /// <summary>The bottom of the range, which means silence (−∞ dB).</summary>
     public const double MinGainDb = -40;
