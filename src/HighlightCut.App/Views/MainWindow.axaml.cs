@@ -15,6 +15,11 @@ public partial class MainWindow : Window
         AddHandler(KeyDownEvent, OnPreviewKeyDown, RoutingStrategies.Tunnel);
         AddHandler(DragDrop.DragOverEvent, OnDragOver);
         AddHandler(DragDrop.DropEvent, OnDrop);
+        AddHandler(DragDrop.DragLeaveEvent, (_, _) =>
+        {
+            Player.SetDropHover(false);
+            Timeline.SetDropHover(false);
+        });
     }
 
     private EditorViewModel? Editor => DataContext as EditorViewModel;
@@ -29,17 +34,30 @@ public partial class MainWindow : Window
         e.Handled = Shortcuts.Handle(editor, e.Key, e.KeyModifiers);
     }
 
+    /// <summary>Files dropped onto the timeline of an open project are added after its last video; anywhere else they open.</summary>
+    private bool OverTimeline(DragEventArgs e) => Editor is { HasFile: true } && Timeline.IsOverTracks(e.GetPosition(Timeline));
+
     private void OnDragOver(object? sender, DragEventArgs e)
     {
         e.DragEffects = e.DataTransfer.Contains(DataFormat.File) ? DragDropEffects.Copy : DragDropEffects.None;
-        Player.SetDropHover(e.DragEffects != DragDropEffects.None);
+        bool files = e.DragEffects != DragDropEffects.None;
+        bool timeline = files && OverTimeline(e);
+        Player.SetDropHover(files && !timeline);
+        Timeline.SetDropHover(timeline);
     }
 
     private void OnDrop(object? sender, DragEventArgs e)
     {
+        bool timeline = OverTimeline(e);
         Player.SetDropHover(false);
-        var path = e.DataTransfer.TryGetFiles()?.Select(f => f.TryGetLocalPath()).FirstOrDefault(p => p is not null);
-        if (path is not null && Editor is { } editor)
-            _ = editor.OpenPath(path);
+        Timeline.SetDropHover(false);
+        var paths = e.DataTransfer.TryGetFiles()?.Select(f => f.TryGetLocalPath()).OfType<string>().ToList() ?? [];
+        if (paths.Count == 0 || Editor is not { } editor)
+            return;
+        List<string> videos = [.. paths.Where(p => !Core.Serialization.ProjectFile.IsProjectPath(p))];
+        if (timeline && videos.Count > 0)
+            _ = editor.AddVideosAsync(videos);
+        else
+            _ = editor.OpenPath(paths[0]);
     }
 }
