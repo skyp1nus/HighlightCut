@@ -34,7 +34,6 @@ public sealed partial class TranscriptPanelViewModel : ViewModelBase
 
     private readonly EditorViewModel _editor;
     private readonly List<TranscriptWordViewModel> _words = [];
-    private readonly List<(DateTime At, long Bytes)> _byteSamples = [];
     private IMediaPreview? _media;
     private Transcript? _transcript;
     private IReadOnlyList<Word> _wordList = [];
@@ -50,7 +49,7 @@ public sealed partial class TranscriptPanelViewModel : ViewModelBase
     public TranscriptPanelViewModel(EditorViewModel editor)
     {
         _editor = editor;
-        SuggestedModel = editor.Settings.Models.FirstOrDefault(m => m.Id == ModelCatalog.Parakeet.Id);
+        ModelOffer = new ModelOfferViewModel(editor);
         editor.PropertyChanged += OnEditorPropertyChanged;
         editor.Session.Changed += (_, _) => UpdateOut();
         foreach (var model in editor.Settings.Models)
@@ -595,81 +594,18 @@ public sealed partial class TranscriptPanelViewModel : ViewModelBase
 
     // ---- Model download -------------------------------------------------------------------
 
+    /// <summary>The download offered when no model is installed (the welcome tour shows the same one).</summary>
+    public ModelOfferViewModel ModelOffer { get; }
+
     /// <summary>The model the tab offers to download (Parakeet).</summary>
-    public TranscriptionModelViewModel? SuggestedModel { get; }
-
-    public bool ShowDownloadButton => SuggestedModel is { IsNotInstalled: true } or { IsFailed: true };
-    public bool IsDownloadingModel => SuggestedModel is { IsDownloading: true };
-
-    /// <summary>"Download parakeet-tdt-0.6b-v3 (487 MB)", or "Retry download (487 MB)" after a failed one.</summary>
-    public string DownloadButtonText => SuggestedModel switch
-    {
-        { IsFailed: true } m => $"Retry download ({m.Size})",
-        { } m => $"Download {m.Id} ({m.Size})",
-        _ => "",
-    };
-
-    /// <summary>Under the button: the recommendation, why the download failed, or why it does not fit.</summary>
-    public string? ModelNote => IsDownloadingModel ? null : SuggestedModel?.Note;
-    public bool ShowModelNote => !string.IsNullOrEmpty(ModelNote);
-    public bool ShowModelOffer => ShowDownloadButton || ShowModelNote;
-
-    /// <summary>"312 of 487 MB · 48 MB/s", or "Unpacking…".</summary>
-    public string DownloadDetail
-    {
-        get
-        {
-            if (SuggestedModel is not { } m)
-                return "";
-            if (m.IsUnpacking)
-                return "Unpacking…";
-            long total = m.TotalBytes ?? m.Model.DownloadSize;
-            double received = _editor.IsDemo ? m.Progress * total : m.ReceivedBytes;
-            string text = total >= 1_000_000_000
-                ? string.Create(CultureInfo.InvariantCulture, $"{received / 1e9:0.0} of {total / 1e9:0.0} GB")
-                : string.Create(CultureInfo.InvariantCulture, $"{received / 1e6:0} of {total / 1e6:0} MB");
-            double? speed = _editor.IsDemo ? 48e6 : Speed();
-            return speed is { } s ? text + string.Create(CultureInfo.InvariantCulture, $" · {s / 1e6:0} MB/s") : text;
-        }
-    }
-
-    /// <summary>Bytes per second over the last second or more of the download; null until known.</summary>
-    private double? Speed()
-    {
-        if (_byteSamples.Count < 2)
-            return null;
-        var (at, bytes) = _byteSamples[^1];
-        for (int i = _byteSamples.Count - 2; i >= 0; i--)
-        {
-            double seconds = (at - _byteSamples[i].At).TotalSeconds;
-            if (seconds >= 1)
-                return (bytes - _byteSamples[i].Bytes) / seconds;
-        }
-        return null;
-    }
+    public TranscriptionModelViewModel? SuggestedModel => ModelOffer.Model;
 
     private void OnModelPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
         if (ReferenceEquals(sender, SuggestedModel))
-        {
-            if (e.PropertyName == nameof(TranscriptionModelViewModel.ReceivedBytes))
-                SampleBytes(SuggestedModel!.ReceivedBytes);
-            foreach (string name in (string[])[nameof(ShowDownloadButton), nameof(IsDownloadingModel), nameof(DownloadButtonText),
-                         nameof(DownloadDetail), nameof(LaneMessage), nameof(ModelNote), nameof(ShowModelNote), nameof(ShowModelOffer)])
-                OnPropertyChanged(name);
-        }
+            OnPropertyChanged(nameof(LaneMessage));
         if (e.PropertyName == nameof(TranscriptionModelViewModel.State))
             Refresh();
-    }
-
-    private void SampleBytes(long bytes)
-    {
-        var now = DateTime.UtcNow;
-        if (_byteSamples.Count > 0 && bytes < _byteSamples[^1].Bytes)
-            _byteSamples.Clear();
-        _byteSamples.Add((now, bytes));
-        // Keep a few seconds: enough for a one-second window.
-        _byteSamples.RemoveAll(s => (now - s.At).TotalSeconds > 3);
     }
 
     /// <summary>The tab's Download was pressed for this video: it is transcribed once the model is installed.</summary>
@@ -678,14 +614,11 @@ public sealed partial class TranscriptPanelViewModel : ViewModelBase
     [RelayCommand]
     private void DownloadModel()
     {
-        if (SuggestedModel is not { } model)
+        if (SuggestedModel is null)
             return;
         TranscribeWhenInstalled = true;
-        model.DownloadCommand.Execute(null);
+        ModelOffer.Download();
     }
-
-    [RelayCommand]
-    private void CancelDownload() => SuggestedModel?.CancelDownloadCommand.Execute(null);
 
     [RelayCommand]
     private void OpenModelSettings()

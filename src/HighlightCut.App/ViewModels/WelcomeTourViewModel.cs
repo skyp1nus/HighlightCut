@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using Avalonia.Input;
 using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -13,14 +14,17 @@ public sealed partial class WelcomeStepViewModel(WelcomeTourViewModel tour, int 
     public string Title { get; } = title;
 
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(Number))]
+    [NotifyPropertyChangedFor(nameof(Number), nameof(AccessibleName))]
     public partial bool IsCurrent { get; set; }
 
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(Number))]
+    [NotifyPropertyChangedFor(nameof(Number), nameof(AccessibleName))]
     public partial bool IsDone { get; set; }
 
     public string Number => IsDone ? "✓" : (Index + 1).ToString(System.Globalization.CultureInfo.InvariantCulture);
+
+    /// <summary>What a screen reader says for the row: "Step 2 of 4, Shortcuts, current".</summary>
+    public string AccessibleName => $"Step {Index + 1} of {tour.Steps.Count}, {Title}" + (IsCurrent ? ", current" : IsDone ? ", done" : "");
 
     [RelayCommand]
     private void Go() => tour.Step = Index;
@@ -71,7 +75,7 @@ public sealed partial class WelcomeTourViewModel : ViewModelBase
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(IsOpenAndCut), nameof(IsShortcuts), nameof(IsTranscript), nameof(IsConnectClaude), nameof(IsLast),
-        nameof(HasBack), nameof(StepText), nameof(NextLabel))]
+        nameof(HasBack), nameof(StepText), nameof(StepAnnouncement), nameof(NextLabel))]
     public partial int Step { get; set; }
 
     public bool IsOpenAndCut => Step == 0;
@@ -81,6 +85,10 @@ public sealed partial class WelcomeTourViewModel : ViewModelBase
     public bool IsLast => Step == Steps.Count - 1;
     public bool HasBack => Step > 0;
     public string StepText => $"{Step + 1} of {Steps.Count}";
+
+    /// <summary>Read out when the step changes: "Step 2 of 4: Shortcuts".</summary>
+    public string StepAnnouncement => $"Step {Step + 1} of {Steps.Count}: {Steps[Step].Title}";
+
     public string NextLabel => IsLast ? "Open a video" : "Continue";
 
     partial void OnStepChanged(int value)
@@ -161,6 +169,29 @@ public sealed partial class WelcomeTourViewModel : ViewModelBase
             Step++;
     }
 
+    /// <summary>
+    /// The dialog's own keys, when focus is not in a control that needs them: Enter continues (or opens a video on the
+    /// last step), → and ← go to the next and previous step. Esc and the Open video key are <see cref="Shortcuts"/>'.
+    /// </summary>
+    public bool HandleKey(Key key)
+    {
+        switch (key)
+        {
+            case Key.Enter:
+                Next();
+                return true;
+            case Key.Right:
+                if (!IsLast)
+                    Step++;
+                return true;
+            case Key.Left:
+                Back();
+                return true;
+            default:
+                return false;
+        }
+    }
+
     /// <summary>Closes the tour and asks for a video.</summary>
     public void Finish()
     {
@@ -190,6 +221,12 @@ public sealed partial class WelcomeTourViewModel : ViewModelBase
     }
 
     // ---- Transcript ---------------------------------------------------------------------------
+
+    /// <summary>
+    /// Parakeet's download when no model is installed, the same one as the Transcript tab's. It downloads only: with no
+    /// video open there is nothing to transcribe, and the download goes on when the tour is closed.
+    /// </summary>
+    public ModelOfferViewModel ModelOffer => _editor.TranscriptPanel.ModelOffer;
 
     public string TranscriptText => "Select words to make a clip, or remove filler words in one go. "
         + (_editor.IsDemo || Settings.TranscribesOnGpu ? "Transcription runs on your GPU." : "Transcription runs on this computer.")

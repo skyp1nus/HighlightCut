@@ -336,7 +336,9 @@ bind to view models and never change the project themselves.
   Clicking a word seeks. A selection can be played (`PlayRange` pauses at its end), kept as a clip (`KeepWords`) or
   cut out (`CutWords`, a `CutRangesCommand`), each one undo step through `EditorSession`. Without a model the tab
   offers Parakeet's download (Retry after a failed one, and why it does not fit when there is no space) and transcribes
-  the video once it is installed.
+  the video once it is installed. The offer itself (button text, note, "312 of 487 MB · 48 MB/s", Cancel) is
+  `ModelOfferViewModel`, shared with the welcome tour; the download is Settings → Transcription's
+  (`SettingsViewModel.Download`), so it goes on when the tab or the tour is closed.
 - **Audio lanes**: one per audio stream (`AudioLaneViewModel`, `EditorViewModel.Audio.cs`). The header has the
   mute button (A1, A2, …), a volume slider from −∞ (−40) to +12 dB in 0.5 dB steps, and the value in dB; the wheel
   moves it half a decibel, a double-click resets it to 0 dB, and the right-click menu has Reset volume and Even out
@@ -390,11 +392,29 @@ bind to view models and never change the project themselves.
   recent file when "On startup" is "Open the last project". `RecentFilesStore` keeps 20 files and lists `Limit` of
   them (Recent files: 5, 10 or 20). The cache card measures `MediaCache.Measure` (one folder per video) off the UI
   thread; Clear cache (`MediaCache.Clear`) keeps the open video's folder and every `transcript-*.json`.
-- **Settings file**: `AppSettings(Transcription, General?, Playback?, Export?, Keyboard?, Mcp?, Timeline?)` (records and enums
-  in `Services/Settings/`), saved by `AppSettingsStore` to `%LOCALAPPDATA%\HighlightCut\settings.json` with
-  source-generated JSON, enums by name (`LenientEnumConverter`). A section missing from the file (an older version
-  wrote it, or it is at its defaults) reads as null and means the defaults; a value this version does not know falls
-  back to its default, and the rest of the file is kept.
+- **Settings file**: `AppSettings(Transcription, General?, Playback?, Export?, Keyboard?, Mcp?, Timeline?,
+  WelcomeTourSeen, LastSeenVersion)` (records and enums in `Services/Settings/`), saved by `AppSettingsStore` to
+  `%LOCALAPPDATA%\HighlightCut\settings.json` with source-generated camelCase JSON, enums by name
+  (`LenientEnumConverter`). A section missing from the file (an older version wrote it, or it is at its defaults)
+  reads as null and means the defaults; a value this version does not know falls back to its default, and the rest of
+  the file is kept. `AppSettingsStore.Existed` says whether the file was there when the store was made, at start.
+- **Startup**: `App.OnFrameworkInitializationCompleted` reads the settings (before the player exists), creates the
+  editor, then `WhatsNewViewModel.OpenAtStart(file, store.Existed)` decides what opens over it, before
+  `EditorViewModel.StartAsync` opens the file. Someone is an existing user when the settings file existed or there are
+  recent files (older builds did not always write settings). A new user gets the welcome tour
+  (`WelcomeTourViewModel.ShouldOpenAtStart`: no file, nothing to reopen, not seen yet) and `LastSeenVersion` is set to
+  this version. An existing user whose `LastSeenVersion` is older than this version, or missing, gets What's new
+  (also with a file on the command line), which marks the tour as seen; closing it (Got it, Enter, Esc, Take the tour)
+  saves `LastSeenVersion`. The same version again (a dev build of it too) opens nothing, except the tour for someone
+  who has not had it. Demo mode opens neither. While either is open, `Shortcuts.Handle` runs none of the editor's keys.
+- **Versions and What's new**: `Version` in `Directory.Build.props` is the one version number; `AppVersion.Text` is
+  the assembly's informational version without `+sha` (0.1.0, or 0.1.0-dev.42 from CI) and `AppVersion.Release` its
+  X.Y.Z, which is what versions are compared by. Settings shows it at the bottom of the section list and in General →
+  About. `CHANGELOG.md` is embedded in the app (`LogicalName` CHANGELOG.md) and read by `Changelog.Parse`: `## X.Y.Z —
+  date` sections, `### New / Improved / Fixed` groups, `- ` bullets (an indented line continues one).
+  `Changelog.Since(lastSeen, current)` gives the sections What's new lists; without a last seen version only the
+  current one. The project menu → What's new shows this version's section. `ChangelogTests` fails when the current
+  version has no notes. See [releasing.md](releasing.md).
 - **App folder**: settings, `recent.json`, `models`, `cache` and `logs` live in `%LOCALAPPDATA%\HighlightCut`
   (`AppDataFolder`). On the first start after the rename, `Program.Main` moves the old `%LOCALAPPDATA%\OurCut` there
   (`AppDataFolder.MoveLegacy`): the whole folder when possible, else entry by entry, never overwriting what the new
@@ -414,9 +434,20 @@ bind to view models and never change the project themselves.
   It is saved as `KeyboardSettings`: only the actions that differ from the defaults, by enum name. The editor runs
   whatever the map gives a key (`Shortcuts.Handle` → `KeyMap.Find` → `Shortcuts.Run`), and the hints (status bar,
   empty screen, mark buttons, the Jump chips) show the map's keys (`SettingsViewModel.Keys`, `ShortcutLabels`).
+- **Welcome tour**: `WelcomeTourViewModel` (view `WelcomeTour`, over the whole window) opens once on an empty first
+  start and again from the project menu; skipping or finishing saves `welcomeTourSeen`. Four steps: Open & cut (with
+  the timeline chips: each one's analysis runs only while it is on, all but Snap start off), Shortcuts (keys from the
+  key map), Transcript (the language, "transcribe on open", and the installed model or `ModelOfferViewModel`'s
+  download, which queues nothing for transcription) and Connect Claude. Esc skips and the Open video key finishes
+  (`Shortcuts.Handle`); the view adds Enter (Continue, or the focused button's own action) and ← → (`HandleKey`),
+  except in text boxes, lists and drop-downs. While it is open focus is in it (Continue first; the app's buttons are
+  made focusable only there) and Tab cycles inside it; when it closes focus goes back. It is 820 × 520 when the
+  window has room, else the window less 20 px on each side with the step scrolling and the buttons in view; below
+  700 px wide the step list narrows. The note after it is placed above the player controls.
 - **Demo mode**: `--demo <screen>` loads the design's sample (`DesignSample`, `DesignTranscript`,
   `DesignSettingsSample`) for a `DesignScreen`. `DemoScenario.Apply` does the common setup, then one partial hook per
-  area (`ApplyTranscriptionMcp`, `ApplyTranscript`, `ApplyClaude`, `ApplyGeneralPlaybackExport`, `ApplyKeyboard`).
+  area (`ApplyTranscriptionMcp`, `ApplyTranscript`, `ApplyClaude`, `ApplyGeneralPlaybackExport`, `ApplyKeyboard`), then
+  the welcome tour's and What's new's screens.
   `DesignScreensTests` renders every screen to `artifacts/screenshots/<screen>.png`.
 
 ### Not wired up yet

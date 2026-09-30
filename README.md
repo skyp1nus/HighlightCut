@@ -111,7 +111,8 @@ above for now.
 Every CI run builds a ready-to-run Windows folder: open the latest run under
 [Actions](https://github.com/skyp1nus/OurCut/actions), download **HighlightCut-win-x64**, unzip it and start
 `HighlightCut.exe`. It includes .NET, ffmpeg, ffprobe and libmpv, so nothing else needs installing. Tagged versions
-(`v*`) are published under [Releases](https://github.com/skyp1nus/OurCut/releases).
+(`v*`) are published under [Releases](https://github.com/skyp1nus/OurCut/releases), with the notes from
+[CHANGELOG.md](CHANGELOG.md); the app shows them once after an update (project menu → What’s new).
 
 If something goes wrong, the details are in `%LOCALAPPDATA%\HighlightCut\logs`. Settings, the recent files list and
 the preview cache are in `%LOCALAPPDATA%\HighlightCut`.
@@ -149,8 +150,9 @@ To see the UI with the sample project from the design, start it in demo mode:
 `dotnet run --project src/HighlightCut.App -- --demo editing`. The other screens: `empty`, `ai`, `export`, `exporting`,
 `transcript`, `transcribing`, `no-model`, `claude-request`, `claude-exporting`, `claude-export-failed`, and the
 settings sections `settings` (Transcription), `settings-general`, `settings-playback`, `settings-export`,
-`settings-keyboard`, `settings-keyboard-recording`, `settings-keyboard-conflict` and `settings-mcp`. Names are
-not case-sensitive and the dashes are optional (`--demo ClaudeExportFailed` works too).
+`settings-keyboard`, `settings-keyboard-recording`, `settings-keyboard-conflict` and `settings-mcp`, the welcome
+tour (`welcome`, `welcome-claude`) and `whats-new`. Names are not case-sensitive and the dashes are optional
+(`--demo ClaudeExportFailed` works too).
 
 Run the tests with `dotnet test HighlightCut.slnx`. The UI tests render the app headlessly and write screenshots to
 `artifacts/screenshots/`, one per demo screen under the same name (`claude-export-failed.png`) and a few more states. Tests that run ffmpeg generate their own small videos; they are skipped when ffmpeg
@@ -178,7 +180,8 @@ design/             The Claude Design export the UI is built from
 ```
 
 See [docs/architecture.md](docs/architecture.md) for how the layers fit together, the list of edit commands
-and the `.highlightcut.json` format.
+and the `.highlightcut.json` format, and [docs/releasing.md](docs/releasing.md) for versions, the changelog and
+releases.
 
 ## License
 

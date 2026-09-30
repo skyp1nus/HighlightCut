@@ -1,0 +1,41 @@
+name: Changelog
+
+# A pull request that changes the app (src/) says so in CHANGELOG.md, under ## Unreleased. "[no changelog]" in the
+# title or the no-changelog label skips the check, for changes nobody would notice. Its own workflow, so editing the
+# title or the labels runs only this again, not the builds.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, edited, labeled, unlabeled]
+
+permissions:
+  contents: read
+
+jobs:
+  changelog:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check that CHANGELOG.md has the change
+        env:
+          TITLE: ${{ github.event.pull_request.title }}
+          SKIP_LABEL: ${{ contains(github.event.pull_request.labels.*.name, 'no-changelog') }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          if [[ "$TITLE" == *"[no changelog]"* || "$SKIP_LABEL" == "true" ]]; then
+            echo "Skipped: [no changelog] in the title or the no-changelog label."
+            exit 0
+          fi
+          changed=$(git diff --name-only "$(git merge-base "$BASE" "$HEAD")" "$HEAD")
+          if ! grep -q '^src/' <<< "$changed"; then
+            echo "Nothing under src/ changed."
+            exit 0
+          fi
+          if ! grep -qx 'CHANGELOG.md' <<< "$changed"; then
+            echo "::error::This pull request changes src/ but not CHANGELOG.md. Add a line under ## Unreleased (New, Improved or Fixed), or put [no changelog] in the title or add the no-changelog label if nobody would notice the change."
+            exit 1
+          fi
+          echo "CHANGELOG.md is updated."
