@@ -30,4 +30,10 @@ public enum DesignScreen
 
     /// <summary>The welcome tour's last step, Connect Claude, waiting for Claude.</summary>
     WelcomeClaude,
+
+    /// <summary>The welcome tour's Transcript step with no model installed: it offers Parakeet's download.</summary>
+    WelcomeTranscript,
+
+    /// <summary>The welcome tour's Transcript step while Parakeet downloads.</summary>
+    WelcomeDownloading,
 }

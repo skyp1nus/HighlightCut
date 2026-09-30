@@ -1,3 +1,7 @@
+using System.Text.RegularExpressions;
+using Avalonia;
+using Avalonia.Automation;
+using Avalonia.Controls;
 using Avalonia.Headless;
 using Avalonia.Headless.XUnit;
 using Avalonia.Input;
@@ -8,10 +12,15 @@ using HighlightCut.App.Demo;
 using HighlightCut.App.Services;
 using HighlightCut.App.ViewModels;
 using HighlightCut.App.Views;
+using HighlightCut.Transcription;
+using HighlightCut.Transcription.Models;
 
 namespace HighlightCut.App.Tests;
 
-/// <summary>The welcome tour: when it opens, its steps, how it closes, and the Connect Claude step's setup.</summary>
+/// <summary>
+/// The welcome tour: when it opens, its steps, how it closes, its keys and focus, the Transcript step's model download,
+/// the Connect Claude step's setup, and how it fits a small window.
+/// </summary>
 public sealed class WelcomeTourTests : IDisposable
 {
     private readonly string _dir = Directory.CreateTempSubdirectory("highlightcut-welcome").FullName;
@@ -24,6 +33,26 @@ public sealed class WelcomeTourTests : IDisposable
         AvaloniaHeadlessPlatform.ForceRenderTimerTick();
         Dispatcher.UIThread.RunJobs();
     }
+
+    private static void Press(Window window, Key key, RawInputModifiers mods = RawInputModifiers.None)
+    {
+        window.KeyPress(key, mods, PhysicalKey.None, null);
+        window.KeyRelease(key, mods, PhysicalKey.None, null);
+        Pump();
+    }
+
+    private static (MainWindow Window, WelcomeTour View) Show(EditorViewModel editor, double width = 1440, double height = 900)
+    {
+        var window = new MainWindow { DataContext = editor, MinWidth = 0, MinHeight = 0, Width = width, Height = height };
+        window.Show();
+        Pump();
+        Pump();
+        return (window, window.GetVisualDescendants().OfType<WelcomeTour>().Single());
+    }
+
+    private static T Part<T>(WelcomeTour view, string name) where T : Control => view.FindControl<T>(name)!;
+
+    private static IInputElement? Focused(Window window) => window.FocusManager?.GetFocusedElement();
 
     [AvaloniaFact]
     public void Opens_at_start_only_for_an_empty_first_launch()
@@ -220,6 +249,312 @@ public sealed class WelcomeTourTests : IDisposable
         Pump();
         using var closed = window.CaptureRenderedFrame();
         closed!.Save(Path.Combine(Screenshots.Directory, "welcome-closed.png"), new PngBitmapEncoderOptions());
+        window.Close();
+    }
+
+    // ---- Transcript step: the model download ---------------------------------------------------------------------
+
+    [AvaloniaFact]
+    public void Transcript_step_offers_the_model_and_its_download_goes_on_after_the_tour()
+    {
+        var editor = App.CreateEditor(DesignScreen.WelcomeTranscript);
+        var tour = editor.Tour;
+        var offer = tour.ModelOffer;
+        Assert.True(tour.IsTranscript);
+        Assert.Same(editor.TranscriptPanel.ModelOffer, offer);
+        Assert.False(offer.IsReady);
+        Assert.True(offer.ShowDownloadButton);
+        Assert.Equal("Download parakeet-tdt-0.6b-v3 (1.3 GB)", offer.DownloadButtonText);
+        Assert.Equal("Multilingual, includes Ukrainian", offer.Note);
+
+        offer.DownloadCommand.Execute(null);
+        Assert.True(offer.IsDownloading);
+        Assert.False(offer.ShowDownloadButton);
+        Assert.Matches(new Regex(@"^\d\.\d of 1\.3 GB · 48 MB/s$"), offer.DownloadDetail);
+
+        // Closed: the download goes on, and with no video nothing is queued for transcription.
+        tour.CloseCommand.Execute(null);
+        for (int i = 0; i < 400 && offer.IsDownloading; i++)
+            editor.Settings.TickDownloads();
+
+        Assert.True(offer.IsReady);
+        Assert.Equal("parakeet-tdt-0.6b-v3", offer.ReadyModelId);
+        Assert.False(editor.HasFile);
+        Assert.False(editor.TranscriptPanel.TranscribeWhenInstalled);
+    }
+
+    [AvaloniaFact]
+    public void Transcript_step_download_cancels_and_retries_after_a_failure()
+    {
+        var editor = App.CreateEditor(DesignScreen.WelcomeTranscript);
+        var offer = editor.Tour.ModelOffer;
+
+        offer.DownloadCommand.Execute(null);
+        offer.CancelCommand.Execute(null);
+        Assert.False(offer.IsDownloading);
+        Assert.True(offer.ShowDownloadButton);
+
+        offer.Model!.Error = "Could not download: 404";
+        offer.Model.State = ModelState.Failed;
+        Assert.Equal("Retry download (1.3 GB)", offer.DownloadButtonText);
+        Assert.Equal("Could not download: 404", offer.Note);
+        offer.DownloadCommand.Execute(null);
+        Assert.True(offer.IsDownloading);
+        Assert.Null(offer.Note);
+    }
+
+    [AvaloniaFact]
+    public void Transcript_step_shows_the_installed_model_as_ready()
+    {
+        var editor = App.CreateEditor(DesignScreen.Welcome);
+        editor.Tour.Step = 2;
+        Assert.True(editor.Tour.ModelOffer.IsReady);
+
+        var (window, view) = Show(editor);
+        Assert.True(Part<StackPanel>(view, "ModelReady").IsEffectivelyVisible);
+        Assert.False(Part<Button>(view, "DownloadButton").IsEffectivelyVisible);
+        window.Close();
+    }
+
+    [AvaloniaFact]
+    public async Task A_real_download_from_the_tour_transcribes_nothing()
+    {
+        var parakeet = ModelCatalog.Parakeet;
+        byte[] archive = SettingsViewModelTests.Archive("sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8", parakeet.Files);
+        var preview = new TranscriptPanelTests.ScriptedPreview();
+        var editor = new EditorViewModel { MediaOpener = new TranscriptPanelTests.ScriptedOpener(preview) };
+        editor.Settings.ModelsFolder = Directory.CreateDirectory(Path.Combine(_dir, "models")).FullName;
+        editor.Settings.Installer = new ModelInstaller(new HttpClient(SettingsViewModelTests.FakeServer.Serving(archive)));
+        editor.Settings.TranscribeOnOpen = false;
+        var offer = editor.Tour.ModelOffer;
+        editor.Tour.Open();
+        Assert.Equal("Download parakeet-tdt-0.6b-v3 (487 MB)", offer.DownloadButtonText);
+
+        offer.DownloadCommand.Execute(null);
+        for (int i = 0; i < 250 && !offer.IsReady; i++)
+        {
+            await Task.Delay(20, TestContext.Current.CancellationToken);
+            Dispatcher.UIThread.RunJobs();
+        }
+        Assert.True(offer.IsReady);
+        Assert.Equal(parakeet.Id, offer.ReadyModelId);
+
+        // A video opened afterwards is not transcribed because of the tour's download.
+        await editor.OpenMediaAsync(Path.Combine(_dir, "talk.mp4"));
+        Assert.Equal(0, preview.Started);
+    }
+
+    [AvaloniaFact]
+    public void Transcript_step_renders_the_offer_and_the_progress()
+    {
+        foreach (var screen in (DesignScreen[])[DesignScreen.WelcomeTranscript, DesignScreen.WelcomeDownloading])
+        {
+            var editor = App.CreateEditor(screen);
+            var (window, view) = Show(editor);
+            bool downloading = screen == DesignScreen.WelcomeDownloading;
+            Assert.Equal(!downloading, Part<Button>(view, "DownloadButton").IsEffectivelyVisible);
+            Assert.Equal(downloading, Part<ModelDownloadProgress>(view, "ModelProgress").IsEffectivelyVisible);
+            Assert.Equal(!downloading, Part<TextBlock>(view, "ModelNote").IsEffectivelyVisible);
+            window.Close();
+        }
+    }
+
+    // ---- Keys and focus -----------------------------------------------------------------------------------------
+
+    [AvaloniaFact]
+    public void Enter_and_the_arrows_move_through_the_steps()
+    {
+        var tour = App.CreateEditor(null).Tour;
+        tour.Open();
+
+        Assert.True(tour.HandleKey(Key.Right));
+        Assert.True(tour.IsShortcuts);
+        Assert.True(tour.HandleKey(Key.Left));
+        Assert.True(tour.HandleKey(Key.Left));
+        Assert.True(tour.IsOpenAndCut);
+        Assert.True(tour.HandleKey(Key.Enter));
+        Assert.True(tour.IsShortcuts);
+        tour.Step = 3;
+        Assert.True(tour.HandleKey(Key.Right));
+        Assert.True(tour.IsConnectClaude);
+        Assert.True(tour.IsOpen);
+        Assert.False(tour.HandleKey(Key.Up));
+    }
+
+    [AvaloniaFact]
+    public void Keys_in_the_window_continue_and_step_but_leave_a_drop_down_alone()
+    {
+        var editor = App.CreateEditor(DesignScreen.Welcome);
+        var (window, view) = Show(editor);
+        var next = Part<Button>(view, "NextButton");
+        Assert.Same(next, Focused(window));
+
+        Press(window, Key.Right);
+        Assert.True(editor.Tour.IsShortcuts);
+        Press(window, Key.Left);
+        Assert.True(editor.Tour.IsOpenAndCut);
+        Press(window, Key.Enter);
+        Press(window, Key.Enter);
+        Assert.True(editor.Tour.IsTranscript);
+
+        // The language drop-down keeps its arrows.
+        var language = Part<ComboBox>(view, "LanguageBox");
+        language.Focus();
+        Press(window, Key.Right);
+        Press(window, Key.Left);
+        Assert.True(editor.Tour.IsTranscript);
+
+        // Back, focused, goes back with Enter; on the first step it is hidden and Continue takes focus.
+        var back = Part<Button>(view, "BackButton");
+        editor.Tour.Step = 1;
+        Pump();
+        back.Focus();
+        Press(window, Key.Enter);
+        Assert.True(editor.Tour.IsOpenAndCut);
+        Pump();
+        Assert.Same(next, Focused(window));
+
+        // Enter on the last step opens a video (the demo's sample).
+        editor.Tour.Step = 3;
+        Pump();
+        Press(window, Key.Enter);
+        Assert.False(editor.Tour.IsOpen);
+        Assert.True(editor.HasFile);
+        window.Close();
+    }
+
+    [AvaloniaFact]
+    public void Tab_stays_in_the_dialog_and_focus_comes_back_after_it()
+    {
+        var editor = App.CreateEditor(DesignScreen.Empty);
+        var (window, view) = Show(editor);
+        // The editor's own buttons take no focus; one that does stands in for whatever had it.
+        var before = window.GetVisualDescendants().OfType<Button>().First(b => b.IsEffectivelyVisible && !view.IsVisualAncestorOf(b));
+        before.Focusable = true;
+        before.Focus();
+        Assert.Same(before, Focused(window));
+
+        editor.Tour.Open();
+        Pump();
+        var dialog = Part<Border>(view, "Dialog");
+        Assert.Same(Part<Button>(view, "NextButton"), Focused(window));
+        for (int step = 0; step < editor.Tour.Steps.Count; step++)
+        {
+            editor.Tour.Step = step;
+            Pump();
+            for (int i = 0; i < 24; i++)
+            {
+                Press(window, Key.Tab, i % 3 == 2 ? RawInputModifiers.Shift : RawInputModifiers.None);
+                Assert.True(Focused(window) is Visual v && dialog.IsVisualAncestorOf(v), $"Tab left the dialog on step {step + 1}");
+            }
+        }
+
+        Press(window, Key.Escape);
+        Assert.False(editor.Tour.IsOpen);
+        Assert.Same(before, Focused(window));
+        window.Close();
+    }
+
+    [AvaloniaFact]
+    public void Buttons_and_steps_have_names_and_the_step_is_announced()
+    {
+        var editor = App.CreateEditor(DesignScreen.Welcome);
+        var (window, view) = Show(editor);
+
+        Assert.Equal("Continue", AutomationProperties.GetName(Part<Button>(view, "NextButton")));
+        Assert.Equal("Skip tour", AutomationProperties.GetName(Part<Button>(view, "SkipButton")));
+        Assert.Equal("Back", AutomationProperties.GetName(Part<Button>(view, "BackButton")));
+        Assert.Equal("Tour steps", AutomationProperties.GetName(Part<ItemsControl>(view, "StepItems")));
+        var steps = Part<ItemsControl>(view, "StepItems").GetVisualDescendants().OfType<Button>().Select(AutomationProperties.GetName);
+        Assert.Equal(["Step 1 of 4, Open & cut, current", "Step 2 of 4, Shortcuts", "Step 3 of 4, Transcript", "Step 4 of 4, Connect Claude"],
+            steps);
+
+        var status = Part<TextBlock>(view, "StepText");
+        Assert.Equal(AutomationLiveSetting.Polite, AutomationProperties.GetLiveSetting(status));
+        editor.Tour.Step = 3;
+        Pump();
+        Assert.Equal("Step 4 of 4: Connect Claude", AutomationProperties.GetName(status));
+        Assert.Equal("Open a video", AutomationProperties.GetName(Part<Button>(view, "NextButton")));
+        Assert.Equal("Step 1 of 4, Open & cut, done", editor.Tour.Steps[0].AccessibleName);
+        window.Close();
+    }
+
+    // ---- Open & cut: the timeline chips ---------------------------------------------------------------------------
+
+    [AvaloniaFact]
+    public void Open_and_cut_explains_the_timeline_chips()
+    {
+        var editor = App.CreateEditor(DesignScreen.Welcome);
+        var (window, view) = Show(editor);
+
+        var chips = Part<WrapPanel>(view, "Chips").Children.OfType<Border>().ToList();
+        Assert.Equal(["Frames", "Keyframes", "Waveform", "Silence", "Scenes", "Transcript", "Snap"],
+            chips.Select(c => c.GetVisualDescendants().OfType<TextBlock>().Last().Text));
+        // As on a first start: only Snap is on.
+        Assert.Equal(["Snap"], chips.Where(c => c.Classes.Contains("on")).Select(c => c.GetVisualDescendants().OfType<TextBlock>().Last().Text));
+        var defaults = new TimelineSettings();
+        Assert.Equal((false, false, false, false, false, true),
+            (defaults.Frames, defaults.Keyframes, defaults.Waveform, defaults.Silences, defaults.Scenes, defaults.Snap));
+        Assert.False(AppSettings.Default.Transcription.TranscribeOnOpen);
+
+        string text = Part<TextBlock>(view, "ChipsText").Text!;
+        Assert.Contains("runs only while the chip is on", text, StringComparison.Ordinal);
+        Assert.Contains("lossless export reads the keyframes", text, StringComparison.Ordinal);
+        // Fits the step without scrolling at the design size.
+        var scroll = Part<ScrollViewer>(view, "StepScroll");
+        Assert.True(scroll.Extent.Height <= scroll.Viewport.Height + 0.5, $"{scroll.Extent.Height} > {scroll.Viewport.Height}");
+        window.Close();
+    }
+
+    // ---- Small windows ------------------------------------------------------------------------------------------
+
+    public static TheoryData<int, int> WindowSizes { get; } = new() { { 1100, 700 }, { 900, 580 }, { 760, 480 }, { 600, 400 } };
+
+    [AvaloniaTheory]
+    [MemberData(nameof(WindowSizes))]
+    public void Fits_a_small_window_with_the_buttons_in_view(int width, int height)
+    {
+        var editor = App.CreateEditor(DesignScreen.WelcomeTranscript);
+        var (window, view) = Show(editor, width, height);
+        var dialog = Part<Border>(view, "Dialog");
+        var bounds = dialog.Bounds;
+        var fits = new Rect(0, 0, width, height).Deflate(16);
+
+        Assert.Equal(Math.Min(820, width - 40), bounds.Width, 0.5);
+        Assert.Equal(Math.Min(520, height - 40), bounds.Height, 0.5);
+        for (int step = 0; step < editor.Tour.Steps.Count; step++)
+        {
+            editor.Tour.Step = step;
+            Pump();
+            foreach (string name in (string[])["NextButton", "SkipButton", "StepText"])
+            {
+                var part = Part<Control>(view, name);
+                var box = new Rect(part.TranslatePoint(default, window)!.Value, part.Bounds.Size);
+                Assert.True(fits.Contains(box), $"{name} at {box} is outside {fits} on step {step + 1}");
+            }
+            if (step == 2 || (step == 0 && width == 1100))
+            {
+                using var frame = window.CaptureRenderedFrame();
+                frame!.Save(Path.Combine(Screenshots.Directory, $"welcome-{width}x{height}-step-{step + 1}.png"), new PngBitmapEncoderOptions());
+            }
+        }
+        window.Close();
+    }
+
+    [AvaloniaFact]
+    public void The_reopen_note_sits_above_the_player_controls()
+    {
+        var editor = App.CreateEditor(DesignScreen.Welcome);
+        var (window, view) = Show(editor);
+        editor.Tour.CloseCommand.Execute(null);
+        Pump();
+        Pump();
+
+        var note = Part<Border>(view, "ReopenNote");
+        var transport = window.GetVisualDescendants().OfType<PlayerPanel>().Single().FindControl<Control>("Transport")!;
+        double noteBottom = note.TranslatePoint(new Point(0, note.Bounds.Height), window)!.Value.Y;
+        double transportTop = transport.TranslatePoint(default, window)!.Value.Y;
+        Assert.Equal(transportTop - 28, noteBottom, 0.5);
         window.Close();
     }
 }

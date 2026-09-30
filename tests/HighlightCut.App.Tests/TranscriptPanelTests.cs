@@ -381,17 +381,17 @@ public sealed class TranscriptPanelTests : IDisposable
         Assert.False(editor.ShowTranscriptLane);
         Assert.Equal(TranscriptPanelState.NoModel, panel.State);
         Assert.Equal("", editor.SidebarHint);
-        Assert.True(panel.ShowDownloadButton);
-        Assert.Equal("Download parakeet-tdt-0.6b-v3 (1.3 GB)", panel.DownloadButtonText);
+        Assert.True(panel.ModelOffer.ShowDownloadButton);
+        Assert.Equal("Download parakeet-tdt-0.6b-v3 (1.3 GB)", panel.ModelOffer.DownloadButtonText);
         Assert.Equal("No transcript yet · install a model in the Transcript tab", panel.LaneMessage);
 
         panel.DownloadModelCommand.Execute(null);
-        Assert.True(panel.IsDownloadingModel);
-        Assert.False(panel.ShowDownloadButton);
+        Assert.True(panel.ModelOffer.IsDownloading);
+        Assert.False(panel.ModelOffer.ShowDownloadButton);
         Assert.Equal("Downloading the transcription model…", panel.LaneMessage);
-        Assert.Matches(new Regex(@"^\d\.\d of 1\.3 GB · 48 MB/s$"), panel.DownloadDetail);
+        Assert.Matches(new Regex(@"^\d\.\d of 1\.3 GB · 48 MB/s$"), panel.ModelOffer.DownloadDetail);
 
-        for (int i = 0; i < 400 && panel.IsDownloadingModel; i++)
+        for (int i = 0; i < 400 && panel.ModelOffer.IsDownloading; i++)
             editor.Settings.TickDownloads();
 
         Assert.True(panel.SuggestedModel!.IsInstalled);
@@ -406,10 +406,10 @@ public sealed class TranscriptPanelTests : IDisposable
         var panel = Panel(editor);
         panel.DownloadModelCommand.Execute(null);
 
-        panel.CancelDownloadCommand.Execute(null);
+        panel.ModelOffer.CancelCommand.Execute(null);
 
-        Assert.False(panel.IsDownloadingModel);
-        Assert.True(panel.ShowDownloadButton);
+        Assert.False(panel.ModelOffer.IsDownloading);
+        Assert.True(panel.ModelOffer.ShowDownloadButton);
         Assert.Equal(TranscriptPanelState.NoModel, panel.State);
     }
 
@@ -419,19 +419,19 @@ public sealed class TranscriptPanelTests : IDisposable
         var editor = App.CreateEditor(DesignScreen.NoModel);
         var panel = Panel(editor);
         var parakeet = panel.SuggestedModel!;
-        Assert.Equal("Multilingual, includes Ukrainian", panel.ModelNote);
+        Assert.Equal("Multilingual, includes Ukrainian", panel.ModelOffer.Note);
 
         parakeet.Error = "Could not download: 404";
         parakeet.State = ModelState.Failed;
-        Assert.True(panel.ShowDownloadButton);
-        Assert.Equal("Retry download (1.3 GB)", panel.DownloadButtonText);
-        Assert.Equal("Could not download: 404", panel.ModelNote);
+        Assert.True(panel.ModelOffer.ShowDownloadButton);
+        Assert.Equal("Retry download (1.3 GB)", panel.ModelOffer.DownloadButtonText);
+        Assert.Equal("Could not download: 404", panel.ModelOffer.Note);
 
         parakeet.SpaceNote = "Needs 1.3 GB · 100 MB free on D:";
         parakeet.State = ModelState.NoSpace;
-        Assert.False(panel.ShowDownloadButton);
-        Assert.True(panel.ShowModelNote);
-        Assert.Equal("Needs 1.3 GB · 100 MB free on D:", panel.ModelNote);
+        Assert.False(panel.ModelOffer.ShowDownloadButton);
+        Assert.True(panel.ModelOffer.ShowNote);
+        Assert.Equal("Needs 1.3 GB · 100 MB free on D:", panel.ModelOffer.Note);
         Assert.Equal("Not enough space for the transcription model · see the Transcript tab", panel.LaneMessage);
     }
 
@@ -529,13 +529,13 @@ public sealed class TranscriptPanelTests : IDisposable
         var model = panel.SuggestedModel!;
 
         model.ReportBytes(InstallPhase.Downloading, 212_000_000, 488_000_000);
-        Assert.Equal("212 of 488 MB", panel.DownloadDetail);
+        Assert.Equal("212 of 488 MB", panel.ModelOffer.DownloadDetail);
 
         model.ReportBytes(InstallPhase.Downloading, 1_200_000, null);
-        Assert.Equal("1 of 487 MB", panel.DownloadDetail);
+        Assert.Equal("1 of 487 MB", panel.ModelOffer.DownloadDetail);
 
         model.ReportBytes(InstallPhase.Unpacking, 488_000_000, 488_000_000);
-        Assert.Equal("Unpacking…", panel.DownloadDetail);
+        Assert.Equal("Unpacking…", panel.ModelOffer.DownloadDetail);
     }
 
     [AvaloniaFact]
@@ -625,7 +625,7 @@ public sealed class TranscriptPanelTests : IDisposable
     }
 
     /// <summary>A file whose transcription the test moves along by hand.</summary>
-    private sealed class ScriptedPreview : IMediaPreview
+    internal sealed class ScriptedPreview : IMediaPreview
     {
         public Transcript? Transcript { get; set; }
         public TranscriptState State { get; set; }
@@ -659,7 +659,7 @@ public sealed class TranscriptPanelTests : IDisposable
             context.FillRectangle(Brushes.DimGray, rect);
     }
 
-    private sealed class ScriptedOpener(ScriptedPreview preview) : IMediaOpener
+    internal sealed class ScriptedOpener(ScriptedPreview preview) : IMediaOpener
     {
         public Task<OpenedMedia> OpenAsync(string path, CancellationToken cancellationToken = default) =>
             Task.FromResult(new OpenedMedia(new SourceMedia(path, 60, 25, [new AudioTrack(1, "Mic")]), preview, "talk.mp4"));

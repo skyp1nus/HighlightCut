@@ -2,67 +2,145 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:HighlightCut.App.ViewModels"
              xmlns:c="using:HighlightCut.App.Controls"
+             xmlns:v="using:HighlightCut.App.Views"
              x:Class="HighlightCut.App.Views.WelcomeTour"
              x:DataType="vm:WelcomeTourViewModel">
   <!--
     design/project/HighlightCut Onboarding.dc.html (1b): an 820 × 520 dialog over the editor, the step list (236 px) on
-    the left, the step on the right. After it closes, a note above the timeline says where to reopen it.
-    The root panel has no background, so with the tour closed only the note takes clicks.
+    the left, the step on the right. In a smaller window it keeps a 20 px margin: the step scrolls and the buttons stay
+    (and below 700 px wide the step list narrows). Tab stays inside it. After it closes, a note above the player
+    controls says where to reopen it. The root panel has no background, so with the tour closed only the note takes clicks.
   -->
   <Panel>
     <Border Name="Scrim" Background="{StaticResource ScrimBrush}" IsVisible="{Binding IsOpen}">
-      <Border Width="820" Height="520" CornerRadius="16" Background="{StaticResource DialogBrush}" ClipToBounds="True"
-              HorizontalAlignment="Center" VerticalAlignment="Center"
+      <Border Name="Dialog" MaxWidth="820" MaxHeight="520" Margin="20" CornerRadius="16" Background="{StaticResource DialogBrush}"
+              ClipToBounds="True" KeyboardNavigation.TabNavigation="Cycle" AutomationProperties.Name="Welcome to HighlightCut"
               BoxShadow="inset 0 1 0 0 #17FFFFFF, 0 0 0 1 #1AFFFFFF, 0 24 60 0 #80000000">
-        <Grid ColumnDefinitions="236,*">
+        <Grid ColumnDefinitions="Auto,*">
           <!-- Step list. -->
-          <Border Background="{StaticResource PanelDeepBrush}" BorderBrush="{StaticResource DividerBrush}" BorderThickness="0,0,1,0"
-                  Padding="16,24,16,16">
+          <Border Name="StepList" Background="{StaticResource PanelDeepBrush}" BorderBrush="{StaticResource DividerBrush}"
+                  BorderThickness="0,0,1,0" Padding="16,24,16,16">
             <DockPanel>
-              <StackPanel DockPanel.Dock="Top" Spacing="6" Margin="8,0">
-                <TextBlock Text="Welcome to HighlightCut" FontSize="18" LetterSpacing="-0.5" LineHeight="22"
-                           Foreground="{StaticResource TextBrush}" TextWrapping="Wrap" />
-                <TextBlock Text="Four things worth knowing. About 30 seconds." FontSize="11.5" Foreground="{StaticResource MutedBrush}"
-                           TextWrapping="Wrap" />
-              </StackPanel>
-              <StackPanel DockPanel.Dock="Bottom" Spacing="4" Margin="8,0">
+              <StackPanel DockPanel.Dock="Bottom" Spacing="4" Margin="8,12,8,0">
                 <Button Name="SkipButton" Classes="quiet" Height="28" Padding="8,0" Margin="-8,0,0,0" HorizontalAlignment="Left"
-                        Content="Skip tour" Command="{Binding CloseCommand}" />
+                        Content="Skip tour" Command="{Binding CloseCommand}" AutomationProperties.Name="Skip tour"
+                        AutomationProperties.HelpText="Closes the tour. Reopen it from the project menu → Welcome tour." />
                 <TextBlock Text="Reopen from the project menu → Welcome tour" FontSize="11" Foreground="{StaticResource Muted3Brush}"
                            TextWrapping="Wrap" />
               </StackPanel>
-              <ItemsControl ItemsSource="{Binding Steps}" Margin="0,20,0,0" VerticalAlignment="Top">
-                <ItemsControl.ItemsPanel>
-                  <ItemsPanelTemplate>
-                    <StackPanel Spacing="2" />
-                  </ItemsPanelTemplate>
-                </ItemsControl.ItemsPanel>
-                <ItemsControl.ItemTemplate>
-                  <DataTemplate x:DataType="vm:WelcomeStepViewModel">
-                    <Button Classes="step" Classes.current="{Binding IsCurrent}" Classes.done="{Binding IsDone}" Command="{Binding GoCommand}">
-                      <StackPanel Orientation="Horizontal" Spacing="10">
-                        <Border Classes="num" Width="20" Height="20" CornerRadius="10" BorderThickness="1" VerticalAlignment="Center">
-                          <TextBlock Text="{Binding Number}" Classes="mono" FontSize="10" FontWeight="Medium"
-                                     HorizontalAlignment="Center" VerticalAlignment="Center" />
-                        </Border>
-                        <TextBlock Classes="title" Text="{Binding Title}" FontSize="12.5" VerticalAlignment="Center" />
-                      </StackPanel>
-                    </Button>
-                  </DataTemplate>
-                </ItemsControl.ItemTemplate>
-              </ItemsControl>
+              <ScrollViewer HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
+                <StackPanel>
+                  <StackPanel Spacing="6" Margin="8,0">
+                    <TextBlock Text="Welcome to HighlightCut" FontSize="18" LetterSpacing="-0.5" LineHeight="22"
+                               Foreground="{StaticResource TextBrush}" TextWrapping="Wrap" />
+                    <TextBlock Text="Four things worth knowing. About 30 seconds." FontSize="11.5" Foreground="{StaticResource MutedBrush}"
+                               TextWrapping="Wrap" />
+                  </StackPanel>
+                  <ItemsControl Name="StepItems" ItemsSource="{Binding Steps}" Margin="0,20,0,0" VerticalAlignment="Top"
+                                AutomationProperties.Name="Tour steps">
+                    <ItemsControl.ItemsPanel>
+                      <ItemsPanelTemplate>
+                        <StackPanel Spacing="2" />
+                      </ItemsPanelTemplate>
+                    </ItemsControl.ItemsPanel>
+                    <ItemsControl.ItemTemplate>
+                      <DataTemplate x:DataType="vm:WelcomeStepViewModel">
+                        <Button Classes="step" Classes.current="{Binding IsCurrent}" Classes.done="{Binding IsDone}" Command="{Binding GoCommand}"
+                                AutomationProperties.Name="{Binding AccessibleName}">
+                          <StackPanel Orientation="Horizontal" Spacing="10">
+                            <Border Classes="num" Width="20" Height="20" CornerRadius="10" BorderThickness="1" VerticalAlignment="Center">
+                              <TextBlock Text="{Binding Number}" Classes="mono" FontSize="10" FontWeight="Medium"
+                                         HorizontalAlignment="Center" VerticalAlignment="Center" />
+                            </Border>
+                            <TextBlock Classes="title" Text="{Binding Title}" FontSize="12.5" VerticalAlignment="Center" />
+                          </StackPanel>
+                        </Button>
+                      </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                  </ItemsControl>
+                </StackPanel>
+              </ScrollViewer>
             </DockPanel>
           </Border>
 
           <Grid Grid.Column="1" RowDefinitions="*,Auto">
-            <Panel Margin="36,32,36,0">
-              <!-- 1 · Open & cut: a sample timeline, one clip left out. -->
+            <ScrollViewer Name="StepScroll" HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
+              <Panel Name="StepContent">
+              <!-- 1 · Open & cut: a sample timeline with its chips (all off but Snap, as on a first start), one clip left out. -->
               <StackPanel Name="OpenAndCutStep" Spacing="10" IsVisible="{Binding IsOpenAndCut}">
                 <TextBlock Classes="heading" Text="Cut without re-encoding" />
                 <TextBlock Classes="body"
                            Text="{Binding Settings.Keys.OpenVideo, StringFormat='Drop a video or press {0}. Mark the parts you want to keep, then export. Clips are copied straight from the source, so export takes seconds and quality stays the same.'}" />
-                <Border Classes="card" Margin="0,14,0,0" Padding="24,22">
+                <Border Classes="card" Margin="0,14,0,0" Padding="24,18,24,22">
                   <StackPanel Spacing="12">
+                    <!-- The timeline toolbar's chips, as they look there; only for show. -->
+                    <WrapPanel Name="Chips" ItemSpacing="4" LineSpacing="4" Margin="-8,0,0,2">
+                      <Border Classes="chip" ToolTip.Tip="Thumbnails on the video track, made while this is on">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                          <Border Classes="swatch" ClipToBounds="True">
+                            <Grid ColumnDefinitions="*,1,*">
+                              <Border Background="#8CFFFFFF" />
+                              <Border Grid.Column="2" Background="#8CFFFFFF" />
+                            </Grid>
+                          </Border>
+                          <TextBlock Text="Frames" />
+                        </StackPanel>
+                      </Border>
+                      <Border Classes="chip" ToolTip.Tip="Keyframe ticks on the video track, scanned while this is on">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                          <Border Classes="swatch" Background="#66FFFFFF" />
+                          <TextBlock Text="Keyframes" />
+                        </StackPanel>
+                      </Border>
+                      <Border Classes="chip" ToolTip.Tip="The audio waveform, read while this is on">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                          <Border Classes="swatch" ClipToBounds="True">
+                            <StackPanel Orientation="Horizontal" Spacing="1" VerticalAlignment="Center" HorizontalAlignment="Center">
+                              <Border Width="1.5" Height="4" Background="#8CFFFFFF" />
+                              <Border Width="1.5" Height="8" Background="#8CFFFFFF" />
+                              <Border Width="1.5" Height="5" Background="#8CFFFFFF" />
+                              <Border Width="1.5" Height="7" Background="#8CFFFFFF" />
+                            </StackPanel>
+                          </Border>
+                          <TextBlock Text="Waveform" />
+                        </StackPanel>
+                      </Border>
+                      <Border Classes="chip" ToolTip.Tip="Silent parts on the audio track, found in the audio while this is on">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                          <Border Classes="swatch" ClipToBounds="True">
+                            <c:HatchFill Period="4" LineWidth="2" Stroke="#4DFFFFFF" />
+                          </Border>
+                          <TextBlock Text="Silence" />
+                        </StackPanel>
+                      </Border>
+                      <Border Classes="chip" ToolTip.Tip="Scene changes; finding them reads every frame">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                          <Border Classes="swatch" Background="#9D9E9F" />
+                          <TextBlock Text="Scenes" />
+                        </StackPanel>
+                      </Border>
+                      <Border Classes="chip"
+                              ToolTip.Tip="The transcript under the video track. The same as “Transcribe new videos automatically”">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                          <Border Classes="swatch" ClipToBounds="True">
+                            <StackPanel Spacing="2">
+                              <Border Height="1.5" Background="#8CFFFFFF" />
+                              <Border Height="1.5" Background="#8CFFFFFF" />
+                              <Border Height="1.5" Background="#8CFFFFFF" />
+                            </StackPanel>
+                          </Border>
+                          <TextBlock Text="Transcript" />
+                        </StackPanel>
+                      </Border>
+                      <Border Classes="chip on" ToolTip.Tip="Trims snap to keyframes, once they are known">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                          <Border Classes="knob">
+                            <Ellipse Width="6" Height="6" Fill="{StaticResource InkBrush}" HorizontalAlignment="Right" Margin="0,0,1.5,0" />
+                          </Border>
+                          <TextBlock Text="Snap" />
+                        </StackPanel>
+                      </Border>
+                    </WrapPanel>
                     <Grid ColumnDefinitions="*,Auto">
                       <TextBlock Classes="mono" Text="00:00" FontSize="10" Foreground="{StaticResource Muted3Brush}" />
                       <TextBlock Grid.Column="1" Classes="mono" Text="14:32" FontSize="10" Foreground="{StaticResource Muted3Brush}" />
@@ -94,6 +172,8 @@
                     </StackPanel>
                   </StackPanel>
                 </Border>
+                <TextBlock Name="ChipsText" Classes="small" Margin="0,4,0,0"
+                           Text="Each chip above the timeline shows one analysis of the video, and that analysis runs only while the chip is on. All but Snap start off, so a video opens and plays at once. What needs the data reads it when you use it: a lossless export reads the keyframes, evening out volumes reads the audio." />
               </StackPanel>
 
               <!-- 2 · Shortcuts: six keys from Settings → Keyboard. -->
@@ -134,6 +214,38 @@
                   </TextBlock>
                 </Border>
                 <StackPanel Margin="0,6,0,0">
+                  <!-- The model: Ready with its name, or Parakeet's download (the Transcript tab's), then its progress. -->
+                  <Border Name="ModelRow" MinHeight="52" BorderBrush="{StaticResource DividerSoftBrush}" BorderThickness="0,0,0,1">
+                    <Panel>
+                      <Grid ColumnDefinitions="*,Auto" IsVisible="{Binding ModelOffer.IsReady}">
+                        <TextBlock Text="Transcription model" FontSize="12" Foreground="{StaticResource Text2Brush}" VerticalAlignment="Center" />
+                        <StackPanel Name="ModelReady" Grid.Column="1" Orientation="Horizontal" Spacing="7" VerticalAlignment="Center">
+                          <Ellipse Width="5" Height="5" Fill="{StaticResource StatusOnBrush}" VerticalAlignment="Center" />
+                          <TextBlock Text="Ready" FontSize="12" Foreground="{StaticResource StatusOnBrush}" VerticalAlignment="Center" />
+                          <TextBlock Classes="mono" Text="{Binding ModelOffer.ReadyModelId}" FontSize="11" Foreground="{StaticResource Text2Brush}"
+                                     VerticalAlignment="Center" />
+                        </StackPanel>
+                      </Grid>
+                      <Panel IsVisible="{Binding !ModelOffer.IsReady}">
+                        <Grid ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto" ColumnSpacing="12" Margin="0,8"
+                              IsVisible="{Binding !ModelOffer.IsDownloading}">
+                          <StackPanel Spacing="2" VerticalAlignment="Center">
+                            <TextBlock Text="No transcription model yet" FontSize="12" Foreground="{StaticResource Text2Brush}" TextWrapping="Wrap" />
+                            <TextBlock Name="ModelNote" Text="{Binding ModelOffer.Note}" IsVisible="{Binding ModelOffer.ShowNote}" FontSize="11"
+                                       Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" />
+                          </StackPanel>
+                          <Button Name="DownloadButton" Classes="soft" Height="28" Padding="12,0" VerticalAlignment="Center"
+                                  Content="{Binding ModelOffer.DownloadButtonText}" Command="{Binding ModelOffer.DownloadCommand}"
+                                  IsVisible="{Binding ModelOffer.ShowDownloadButton}"
+                                  IsEnabled="{Binding ModelOffer.Model.CanManage, FallbackValue=False}"
+                                  AutomationProperties.Name="{Binding ModelOffer.DownloadButtonText}" />
+                        </Grid>
+                        <Panel Margin="0,8,0,10" IsVisible="{Binding ModelOffer.IsDownloading}">
+                          <v:ModelDownloadProgress Name="ModelProgress" DataContext="{Binding ModelOffer}" />
+                        </Panel>
+                      </Panel>
+                    </Panel>
+                  </Border>
                   <Border Height="44" BorderBrush="{StaticResource DividerSoftBrush}" BorderThickness="0,0,0,1">
                     <Grid ColumnDefinitions="*,Auto">
                       <TextBlock Text="Spoken language" FontSize="12" Foreground="{StaticResource Text2Brush}" VerticalAlignment="Center" />
@@ -204,15 +316,19 @@
                   <TextBlock Text="You can do this later in Settings → MCP server." FontSize="11" Foreground="{StaticResource MutedBrush}" />
                 </StackPanel>
               </StackPanel>
-            </Panel>
+              </Panel>
+            </ScrollViewer>
 
-            <Grid Grid.Row="1" ColumnDefinitions="*,Auto" Margin="20,16">
+            <Grid Grid.Row="1" ColumnDefinitions="*,Auto" Margin="20,0,20,16">
               <TextBlock Name="StepText" Classes="mono" Text="{Binding StepText}" FontSize="10.5" Foreground="{StaticResource MutedBrush}"
-                         Margin="16,0,0,0" VerticalAlignment="Center" />
+                         Margin="16,0,0,0" VerticalAlignment="Center"
+                         AutomationProperties.Name="{Binding StepAnnouncement}" AutomationProperties.LiveSetting="Polite" />
               <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6">
                 <Button Name="BackButton" Classes="soft" Height="30" Padding="12,0" CornerRadius="10" FontSize="12.5" Content="Back"
-                        IsVisible="{Binding HasBack}" Command="{Binding BackCommand}" />
-                <Button Name="NextButton" Classes="bone" Height="30" Padding="16,0" FontWeight="Normal" Command="{Binding NextCommand}">
+                        IsVisible="{Binding HasBack}" Command="{Binding BackCommand}" AutomationProperties.Name="Back"
+                        AutomationProperties.AcceleratorKey="Left" />
+                <Button Name="NextButton" Classes="bone" Height="30" Padding="16,0" FontWeight="Normal" Command="{Binding NextCommand}"
+                        AutomationProperties.Name="{Binding NextLabel}" AutomationProperties.AcceleratorKey="Enter">
                   <StackPanel Orientation="Horizontal" Spacing="8">
                     <TextBlock Text="{Binding NextLabel}" VerticalAlignment="Center" />
                     <Border Height="16" Padding="5,0" CornerRadius="4" BorderThickness="1" BorderBrush="#40333333" VerticalAlignment="Center"
@@ -229,19 +345,32 @@
       </Border>
     </Border>
 
-    <!-- After the tour: where to find it again. Low in the preview, above the player controls, centred. -->
-    <Border Name="ReopenNote" IsVisible="{Binding IsNoteVisible}" HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="0,0,0,312"
+    <!-- After the tour: where to find it again. Low in the preview, just above the player controls (placed in code), centred. -->
+    <Border Name="ReopenNote" IsVisible="{Binding IsNoteVisible}" HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="0,0,0,24"
             Padding="16,10,10,10" CornerRadius="12" Background="{StaticResource DialogBrush}"
             BoxShadow="inset 0 1 0 0 #17FFFFFF, 0 0 0 1 #1FFFFFFF, 0 16 36 0 #73000000">
       <StackPanel Orientation="Horizontal" Spacing="16">
         <TextBlock Text="Reopen the tour anytime from the project menu → Welcome tour." FontSize="12.5" Foreground="{StaticResource Text2Brush}"
                    VerticalAlignment="Center" />
-        <Button Name="ReplayButton" Classes="soft" Height="28" Padding="12,0" Content="Replay" Command="{Binding OpenCommand}" />
+        <Button Name="ReplayButton" Classes="soft" Height="28" Padding="12,0" Content="Replay" Command="{Binding OpenCommand}"
+                AutomationProperties.Name="Replay the welcome tour" />
       </StackPanel>
     </Border>
   </Panel>
 
   <UserControl.Styles>
+    <!-- The app's buttons and switches take no focus (the editor's keys come first); in the tour they do, for Tab. -->
+    <Style Selector="Border#Dialog :is(Button), Border#ReopenNote Button, Border#Dialog CheckBox">
+      <Setter Property="Focusable" Value="True" />
+    </Style>
+    <Style Selector="Border#Dialog Button:focus-visible, Border#ReopenNote Button:focus-visible">
+      <Setter Property="BorderBrush" Value="#9960A5FA" />
+      <Setter Property="BorderThickness" Value="1.5" />
+    </Style>
+    <Style Selector="Border#Dialog CheckBox:focus-visible">
+      <Setter Property="Background" Value="#0AFFFFFF" />
+    </Style>
+
     <Style Selector="TextBlock.heading">
       <Setter Property="FontSize" Value="28" />
       <Setter Property="LetterSpacing" Value="-0.7" />
@@ -252,6 +381,14 @@
       <Setter Property="FontSize" Value="13" />
       <Setter Property="LineHeight" Value="20" />
       <Setter Property="Foreground" Value="{StaticResource Text4Brush}" />
+      <Setter Property="TextWrapping" Value="Wrap" />
+      <Setter Property="MaxWidth" Value="460" />
+      <Setter Property="HorizontalAlignment" Value="Left" />
+    </Style>
+    <Style Selector="TextBlock.small">
+      <Setter Property="FontSize" Value="11.5" />
+      <Setter Property="LineHeight" Value="17.5" />
+      <Setter Property="Foreground" Value="{StaticResource MutedBrush}" />
       <Setter Property="TextWrapping" Value="Wrap" />
       <Setter Property="MaxWidth" Value="460" />
       <Setter Property="HorizontalAlignment" Value="Left" />
@@ -331,6 +468,64 @@
     </Style>
     <Style Selector="Border.clip.off TextBlock">
       <Setter Property="Foreground" Value="{StaticResource Muted3Brush}" />
+    </Style>
+
+    <!-- The timeline toolbar's chips (TimelinePanel's Button.chip), drawn as pills: dim while off, Snap on. -->
+    <Style Selector="Border.chip">
+      <Setter Property="Height" Value="24" />
+      <Setter Property="Padding" Value="8,0" />
+      <Setter Property="CornerRadius" Value="6" />
+      <Setter Property="Background" Value="Transparent" />
+    </Style>
+    <Style Selector="Border.chip TextBlock">
+      <Setter Property="FontSize" Value="11.5" />
+      <Setter Property="Foreground" Value="{StaticResource Muted3Brush}" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+    <Style Selector="Border.chip.on TextBlock">
+      <Setter Property="Foreground" Value="{StaticResource Text2Brush}" />
+    </Style>
+    <Style Selector="Border.chip > StackPanel">
+      <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+    <Style Selector="Border.swatch">
+      <Setter Property="Width" Value="10" />
+      <Setter Property="Height" Value="10" />
+      <Setter Property="CornerRadius" Value="2" />
+      <Setter Property="BoxShadow" Value="inset 0 0 0 1 #40FFFFFF" />
+      <Setter Property="Opacity" Value="0.3" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+    <!-- A small switch, on. -->
+    <Style Selector="Border.knob">
+      <Setter Property="Width" Value="16" />
+      <Setter Property="Height" Value="9" />
+      <Setter Property="CornerRadius" Value="4.5" />
+      <Setter Property="Background" Value="{StaticResource BoneBrush}" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+
+    <Style Selector="Border#StepList">
+      <Setter Property="Width" Value="236" />
+    </Style>
+    <Style Selector="Panel#StepContent">
+      <Setter Property="Margin" Value="36,32,36,16" />
+    </Style>
+    <Style Selector="Button#DownloadButton">
+      <Setter Property="Grid.Column" Value="1" />
+    </Style>
+    <!-- Narrow window: a narrower step list, less padding, and the model's Download under its label. -->
+    <Style Selector="Border#Dialog.narrow Button#DownloadButton">
+      <Setter Property="Grid.Column" Value="0" />
+      <Setter Property="Grid.Row" Value="1" />
+      <Setter Property="Margin" Value="0,8,0,0" />
+      <Setter Property="HorizontalAlignment" Value="Left" />
+    </Style>
+    <Style Selector="Border#Dialog.narrow Border#StepList">
+      <Setter Property="Width" Value="188" />
+    </Style>
+    <Style Selector="Border#Dialog.narrow Panel#StepContent">
+      <Setter Property="Margin" Value="24,24,24,16" />
     </Style>
 
     <!-- Key cap of the Shortcuts step: 22 px, charcoal, a hairline ring and a dark bottom edge. -->

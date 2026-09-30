@@ -336,7 +336,9 @@ bind to view models and never change the project themselves.
   Clicking a word seeks. A selection can be played (`PlayRange` pauses at its end), kept as a clip (`KeepWords`) or
   cut out (`CutWords`, a `CutRangesCommand`), each one undo step through `EditorSession`. Without a model the tab
   offers Parakeet's download (Retry after a failed one, and why it does not fit when there is no space) and transcribes
-  the video once it is installed.
+  the video once it is installed. The offer itself (button text, note, "312 of 487 MB · 48 MB/s", Cancel) is
+  `ModelOfferViewModel`, shared with the welcome tour; the download is Settings → Transcription's
+  (`SettingsViewModel.Download`), so it goes on when the tab or the tour is closed.
 - **Audio lanes**: one per audio stream (`AudioLaneViewModel`, `EditorViewModel.Audio.cs`). The header has the
   mute button (A1, A2, …), a volume slider from −∞ (−40) to +12 dB in 0.5 dB steps, and the value in dB; the wheel
   moves it half a decibel, a double-click resets it to 0 dB, and the right-click menu has Reset volume and Even out
@@ -399,6 +401,16 @@ bind to view models and never change the project themselves.
   It is saved as `KeyboardSettings`: only the actions that differ from the defaults, by enum name. The editor runs
   whatever the map gives a key (`Shortcuts.Handle` → `KeyMap.Find` → `Shortcuts.Run`), and the hints (status bar,
   empty screen, mark buttons, the Jump chips) show the map's keys (`SettingsViewModel.Keys`, `ShortcutLabels`).
+- **Welcome tour**: `WelcomeTourViewModel` (view `WelcomeTour`, over the whole window) opens once on an empty first
+  start and again from the project menu; skipping or finishing saves `welcomeTourSeen`. Four steps: Open & cut (with
+  the timeline chips: each one's analysis runs only while it is on, all but Snap start off), Shortcuts (keys from the
+  key map), Transcript (the language, "transcribe on open", and the installed model or `ModelOfferViewModel`'s
+  download, which queues nothing for transcription) and Connect Claude. Esc skips and the Open video key finishes
+  (`Shortcuts.Handle`); the view adds Enter (Continue, or the focused button's own action) and ← → (`HandleKey`),
+  except in text boxes, lists and drop-downs. While it is open focus is in it (Continue first; the app's buttons are
+  made focusable only there) and Tab cycles inside it; when it closes focus goes back. It is 820 × 520 when the
+  window has room, else the window less 20 px on each side with the step scrolling and the buttons in view; below
+  700 px wide the step list narrows. The note after it is placed above the player controls.
 - **Demo mode**: `--demo <screen>` loads the design's sample (`DesignSample`, `DesignTranscript`,
   `DesignSettingsSample`) for a `DesignScreen`. `DemoScenario.Apply` does the common setup, then one partial hook per
   area (`ApplyTranscriptionMcp`, `ApplyTranscript`, `ApplyClaude`, `ApplyGeneralPlaybackExport`, `ApplyKeyboard`).

@@ -31,7 +31,8 @@ public static partial class DemoScenario
         editor.Settings.LoadDemo();
         editor.Tour.Reset();
 
-        if (screen is DesignScreen.Empty or DesignScreen.Welcome or DesignScreen.WelcomeClaude)
+        if (screen is DesignScreen.Empty or DesignScreen.Welcome or DesignScreen.WelcomeClaude or DesignScreen.WelcomeTranscript
+            or DesignScreen.WelcomeDownloading)
             editor.Claude.Recount();
         else
             ApplyEditor(editor, screen);
@@ -44,17 +45,32 @@ public static partial class DemoScenario
         ApplyWelcome(editor, screen);
     }
 
-    /// <summary>The welcome tour's screens: its first step, or Connect Claude before Claude has connected.</summary>
+    /// <summary>
+    /// The welcome tour's screens: its first step, Connect Claude before Claude has connected, or the Transcript step with
+    /// no model (offering the download, or downloading it at 64 %).
+    /// </summary>
     private static void ApplyWelcome(EditorViewModel editor, DesignScreen screen)
     {
-        if (screen is not (DesignScreen.Welcome or DesignScreen.WelcomeClaude))
+        if (screen is not (DesignScreen.Welcome or DesignScreen.WelcomeClaude or DesignScreen.WelcomeTranscript
+            or DesignScreen.WelcomeDownloading))
             return;
         editor.Tour.Open();
-        if (screen == DesignScreen.WelcomeClaude)
+        switch (screen)
         {
-            editor.Claude.IsConnected = false;
-            editor.Claude.IsListening = true;
-            editor.Tour.Step = 3;
+            case DesignScreen.WelcomeClaude:
+                editor.Claude.IsConnected = false;
+                editor.Claude.IsListening = true;
+                editor.Tour.Step = 3;
+                break;
+            case DesignScreen.WelcomeTranscript or DesignScreen.WelcomeDownloading:
+                editor.Settings.LoadDesignNoModels();
+                editor.Tour.Step = 2;
+                if (screen == DesignScreen.WelcomeDownloading)
+                {
+                    editor.Tour.ModelOffer.Download();
+                    editor.Tour.ModelOffer.Model!.Progress = 0.64;
+                }
+                break;
         }
     }
 
