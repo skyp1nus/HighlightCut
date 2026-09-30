@@ -14,6 +14,12 @@ public sealed class AppSettingsStore(string file)
 
     public string File { get; } = file;
 
+    /// <summary>
+    /// The file was there before this start (when the store was made): someone used the app before, so an update shows
+    /// What's new instead of the welcome tour.
+    /// </summary>
+    public bool Existed { get; } = System.IO.File.Exists(file);
+
     /// <summary>The saved settings; a missing or broken file reads as the defaults.</summary>
     public AppSettings Load()
     {

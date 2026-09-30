@@ -15,6 +15,18 @@ public static class Shortcuts
             return true;
         }
 
+        // What's new: Enter and Esc close it (Got it); nothing else runs under it.
+        var whatsNew = editor.WhatsNew;
+        if (whatsNew.IsOpen)
+        {
+            if (key is Key.Escape or Key.Enter && mods == KeyModifiers.None)
+            {
+                whatsNew.Close();
+                return true;
+            }
+            return false;
+        }
+
         // The welcome tour: Esc skips it, the Open video key (shown on its last step) finishes it; nothing else runs under it.
         var tour = editor.Tour;
         if (tour.IsOpen)

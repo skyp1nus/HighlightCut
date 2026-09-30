@@ -1,0 +1,103 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:HighlightCut.App.ViewModels"
+             xmlns:s="using:HighlightCut.App.Services"
+             x:Class="HighlightCut.App.Views.WhatsNewDialog"
+             x:DataType="vm:WhatsNewViewModel">
+  <!--
+    What's new after an update: the welcome tour's scrim and card, 560 wide. The notes scroll and the footer stays, so it
+    fits a small window.
+  -->
+  <Border Name="Scrim" Background="{StaticResource ScrimBrush}">
+    <Border Name="Card" Width="560" MaxHeight="620" Margin="24" CornerRadius="16" Background="{StaticResource DialogBrush}"
+            ClipToBounds="True" HorizontalAlignment="Center" VerticalAlignment="Center"
+            BoxShadow="inset 0 1 0 0 #17FFFFFF, 0 0 0 1 #1AFFFFFF, 0 24 60 0 #80000000">
+      <Grid RowDefinitions="Auto,*,Auto">
+        <TextBlock Name="Title" Classes="heading" Text="{Binding Title}" Margin="36,32,36,4" />
+
+        <ScrollViewer Name="Notes" Grid.Row="1" HorizontalScrollBarVisibility="Disabled">
+          <ItemsControl ItemsSource="{Binding Releases}" Margin="36,8,36,24">
+            <ItemsControl.ItemsPanel>
+              <ItemsPanelTemplate>
+                <StackPanel Spacing="24" />
+              </ItemsPanelTemplate>
+            </ItemsControl.ItemsPanel>
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="s:ChangelogRelease">
+                <StackPanel Spacing="14">
+                  <TextBlock Classes="mono" Text="{Binding Heading}" FontSize="10.5" Foreground="{StaticResource MutedBrush}" />
+                  <ItemsControl ItemsSource="{Binding Groups}">
+                    <ItemsControl.ItemsPanel>
+                      <ItemsPanelTemplate>
+                        <StackPanel Spacing="16" />
+                      </ItemsPanelTemplate>
+                    </ItemsControl.ItemsPanel>
+                    <ItemsControl.ItemTemplate>
+                      <DataTemplate x:DataType="s:ChangelogGroup">
+                        <StackPanel Spacing="8">
+                          <TextBlock Classes="group" Text="{Binding Title}" />
+                          <ItemsControl ItemsSource="{Binding Items}">
+                            <ItemsControl.ItemsPanel>
+                              <ItemsPanelTemplate>
+                                <StackPanel Spacing="6" />
+                              </ItemsPanelTemplate>
+                            </ItemsControl.ItemsPanel>
+                            <ItemsControl.ItemTemplate>
+                              <DataTemplate x:DataType="x:String">
+                                <Grid ColumnDefinitions="16,*">
+                                  <Ellipse Width="4" Height="4" Margin="0,8,0,0" HorizontalAlignment="Left" VerticalAlignment="Top"
+                                           Fill="{StaticResource Muted3Brush}" />
+                                  <TextBlock Grid.Column="1" Classes="item" Text="{Binding}" />
+                                </Grid>
+                              </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                          </ItemsControl>
+                        </StackPanel>
+                      </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                  </ItemsControl>
+                </StackPanel>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+        </ScrollViewer>
+
+        <Border Grid.Row="2" BorderBrush="{StaticResource DividerBrush}" BorderThickness="0,1,0,0" Padding="20,16">
+          <StackPanel Orientation="Horizontal" Spacing="6" HorizontalAlignment="Right">
+            <Button Name="TourButton" Classes="soft" Height="30" Padding="12,0" CornerRadius="10" FontSize="12.5" Content="Take the tour"
+                    Command="{Binding TakeTourCommand}" />
+            <Button Name="GotItButton" Classes="bone" Height="30" Padding="16,0" FontWeight="Normal" Command="{Binding CloseCommand}">
+              <StackPanel Orientation="Horizontal" Spacing="8">
+                <TextBlock Text="Got it" VerticalAlignment="Center" />
+                <Border Height="16" Padding="5,0" CornerRadius="4" BorderThickness="1" BorderBrush="#40333333" VerticalAlignment="Center">
+                  <TextBlock Classes="mono" Text="Enter" FontSize="10" FontWeight="Medium" Foreground="#666666" VerticalAlignment="Center" />
+                </Border>
+              </StackPanel>
+            </Button>
+          </StackPanel>
+        </Border>
+      </Grid>
+    </Border>
+  </Border>
+
+  <UserControl.Styles>
+    <Style Selector="TextBlock.heading">
+      <Setter Property="FontSize" Value="24" />
+      <Setter Property="LetterSpacing" Value="-0.6" />
+      <Setter Property="LineHeight" Value="30" />
+      <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
+      <Setter Property="TextWrapping" Value="Wrap" />
+    </Style>
+    <Style Selector="TextBlock.group">
+      <Setter Property="FontSize" Value="11.5" />
+      <Setter Property="FontWeight" Value="Medium" />
+      <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
+    </Style>
+    <Style Selector="TextBlock.item">
+      <Setter Property="FontSize" Value="13" />
+      <Setter Property="LineHeight" Value="20" />
+      <Setter Property="Foreground" Value="{StaticResource Text4Brush}" />
+      <Setter Property="TextWrapping" Value="Wrap" />
+    </Style>
+  </UserControl.Styles>
+</UserControl>
