@@ -1,0 +1,394 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:HighlightCut.App.ViewModels"
+             xmlns:c="using:HighlightCut.App.Controls"
+             x:Class="HighlightCut.App.Views.WelcomeTour"
+             x:DataType="vm:WelcomeTourViewModel">
+  <!--
+    design/project/HighlightCut Onboarding.dc.html (1b): an 820 × 520 dialog over the editor, the step list (236 px) on
+    the left, the step on the right. After it closes, a note above the timeline says where to reopen it.
+    The root panel has no background, so with the tour closed only the note takes clicks.
+  -->
+  <Panel>
+    <Border Name="Scrim" Background="{StaticResource ScrimBrush}" IsVisible="{Binding IsOpen}">
+      <Border Width="820" Height="520" CornerRadius="16" Background="{StaticResource DialogBrush}" ClipToBounds="True"
+              HorizontalAlignment="Center" VerticalAlignment="Center"
+              BoxShadow="inset 0 1 0 0 #17FFFFFF, 0 0 0 1 #1AFFFFFF, 0 24 60 0 #80000000">
+        <Grid ColumnDefinitions="236,*">
+          <!-- Step list. -->
+          <Border Background="{StaticResource PanelDeepBrush}" BorderBrush="{StaticResource DividerBrush}" BorderThickness="0,0,1,0"
+                  Padding="16,24,16,16">
+            <DockPanel>
+              <StackPanel DockPanel.Dock="Top" Spacing="6" Margin="8,0">
+                <TextBlock Text="Welcome to HighlightCut" FontSize="18" LetterSpacing="-0.5" LineHeight="22"
+                           Foreground="{StaticResource TextBrush}" TextWrapping="Wrap" />
+                <TextBlock Text="Four things worth knowing. About 30 seconds." FontSize="11.5" Foreground="{StaticResource MutedBrush}"
+                           TextWrapping="Wrap" />
+              </StackPanel>
+              <StackPanel DockPanel.Dock="Bottom" Spacing="4" Margin="8,0">
+                <Button Name="SkipButton" Classes="quiet" Height="28" Padding="8,0" Margin="-8,0,0,0" HorizontalAlignment="Left"
+                        Content="Skip tour" Command="{Binding CloseCommand}" />
+                <TextBlock Text="Reopen from the project menu → Welcome tour" FontSize="11" Foreground="{StaticResource Muted3Brush}"
+                           TextWrapping="Wrap" />
+              </StackPanel>
+              <ItemsControl ItemsSource="{Binding Steps}" Margin="0,20,0,0" VerticalAlignment="Top">
+                <ItemsControl.ItemsPanel>
+                  <ItemsPanelTemplate>
+                    <StackPanel Spacing="2" />
+                  </ItemsPanelTemplate>
+                </ItemsControl.ItemsPanel>
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate x:DataType="vm:WelcomeStepViewModel">
+                    <Button Classes="step" Classes.current="{Binding IsCurrent}" Classes.done="{Binding IsDone}" Command="{Binding GoCommand}">
+                      <StackPanel Orientation="Horizontal" Spacing="10">
+                        <Border Classes="num" Width="20" Height="20" CornerRadius="10" BorderThickness="1" VerticalAlignment="Center">
+                          <TextBlock Text="{Binding Number}" Classes="mono" FontSize="10" FontWeight="Medium"
+                                     HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Border>
+                        <TextBlock Classes="title" Text="{Binding Title}" FontSize="12.5" VerticalAlignment="Center" />
+                      </StackPanel>
+                    </Button>
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+            </DockPanel>
+          </Border>
+
+          <Grid Grid.Column="1" RowDefinitions="*,Auto">
+            <Panel Margin="36,32,36,0">
+              <!-- 1 · Open & cut: a sample timeline, one clip left out. -->
+              <StackPanel Name="OpenAndCutStep" Spacing="10" IsVisible="{Binding IsOpenAndCut}">
+                <TextBlock Classes="heading" Text="Cut without re-encoding" />
+                <TextBlock Classes="body"
+                           Text="{Binding Settings.Keys.OpenVideo, StringFormat='Drop a video or press {0}. Mark the parts you want to keep, then export. Clips are copied straight from the source, so export takes seconds and quality stays the same.'}" />
+                <Border Classes="card" Margin="0,14,0,0" Padding="24,22">
+                  <StackPanel Spacing="12">
+                    <Grid ColumnDefinitions="*,Auto">
+                      <TextBlock Classes="mono" Text="00:00" FontSize="10" Foreground="{StaticResource Muted3Brush}" />
+                      <TextBlock Grid.Column="1" Classes="mono" Text="14:32" FontSize="10" Foreground="{StaticResource Muted3Brush}" />
+                    </Grid>
+                    <Panel Height="44">
+                      <Border CornerRadius="6" Background="#17181B" BorderBrush="#0FFFFFFF" BorderThickness="1" />
+                      <Grid ColumnDefinitions="4*,20*,6*,24*,6*,16*,6*,13*,5*">
+                        <Border Grid.Column="1" Classes="clip"><TextBlock Text="Cold open" /></Border>
+                        <Border Grid.Column="3" Classes="clip"><TextBlock Text="Setup" /></Border>
+                        <Border Grid.Column="5" Classes="clip off">
+                          <Panel>
+                            <c:StripeFill ColorA="#1C1D20" ColorB="#17181B" Band="4" />
+                            <TextBlock Text="Q&amp;A" />
+                          </Panel>
+                        </Border>
+                        <Border Grid.Column="7" Classes="clip"><TextBlock Text="Outro" /></Border>
+                      </Grid>
+                      <!-- Playhead at 44 %. -->
+                      <Grid ColumnDefinitions="44*,56*" ClipToBounds="False">
+                        <Border Grid.Column="1" Width="1.5" Margin="0,-6" HorizontalAlignment="Left" Background="{StaticResource TextBrush}" />
+                      </Grid>
+                    </Panel>
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                      <Border Height="18" Padding="6,0" CornerRadius="5.26" BorderThickness="1" BorderBrush="#9960A5FA" VerticalAlignment="Center">
+                        <TextBlock Text="Lossless" FontSize="10" FontWeight="Medium" Foreground="{StaticResource LinkBrush}" VerticalAlignment="Center" />
+                      </Border>
+                      <TextBlock Text="Striped clips are left out of the export." FontSize="11" Foreground="{StaticResource MutedBrush}"
+                                 VerticalAlignment="Center" />
+                    </StackPanel>
+                  </StackPanel>
+                </Border>
+              </StackPanel>
+
+              <!-- 2 · Shortcuts: six keys from Settings → Keyboard. -->
+              <StackPanel Name="ShortcutsStep" Spacing="10" IsVisible="{Binding IsShortcuts}">
+                <TextBlock Classes="heading" Text="Everything has a shortcut" />
+                <TextBlock Classes="body" Text="These six cover most edits. Change any of them in Settings → Keyboard." />
+                <Border Margin="0,14,0,0" BorderBrush="{StaticResource DividerSoftBrush}" BorderThickness="0,1,0,0">
+                  <ItemsControl ItemsSource="{Binding Keys}">
+                    <ItemsControl.ItemTemplate>
+                      <DataTemplate x:DataType="vm:WelcomeKey">
+                        <Border Height="40" BorderBrush="{StaticResource DividerSoftBrush}" BorderThickness="0,0,0,1">
+                          <Grid ColumnDefinitions="*,Auto">
+                            <TextBlock Text="{Binding Action}" FontSize="12.5" Foreground="{StaticResource Text2Brush}" VerticalAlignment="Center" />
+                            <Border Grid.Column="1" Classes="keycap">
+                              <TextBlock Text="{Binding Key}" />
+                            </Border>
+                          </Grid>
+                        </Border>
+                      </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                  </ItemsControl>
+                </Border>
+              </StackPanel>
+
+              <!-- 3 · Transcript: a sample paragraph, then the language and "transcribe on open" of Settings → Transcription. -->
+              <StackPanel Name="TranscriptStep" Spacing="10" IsVisible="{Binding IsTranscript}">
+                <TextBlock Classes="heading" Text="Edit by transcript" />
+                <TextBlock Classes="body" Text="{Binding TranscriptText}" />
+                <Border Classes="card" Margin="0,14,0,0" Padding="20,16">
+                  <!-- The line breaks between the runs are the spaces. -->
+                  <TextBlock FontSize="13.5" LineHeight="23" LetterSpacing="-0.2" Foreground="{StaticResource Text4Brush}" TextWrapping="Wrap">
+                    <Run Text="Everything has a shortcut." />
+                    <Run Text="Space plays, the arrows step one frame, and shift jumps a second." Background="#383B82F6"
+                         Foreground="{StaticResource TextBrush}" />
+                    <Run Text="The whole point is speed, and," />
+                    <Run Text="uh," TextDecorations="Strikethrough" Foreground="{StaticResource Muted3Brush}" />
+                    <Run Text="nobody should need a mouse." />
+                  </TextBlock>
+                </Border>
+                <StackPanel Margin="0,6,0,0">
+                  <Border Height="44" BorderBrush="{StaticResource DividerSoftBrush}" BorderThickness="0,0,0,1">
+                    <Grid ColumnDefinitions="*,Auto">
+                      <TextBlock Text="Spoken language" FontSize="12" Foreground="{StaticResource Text2Brush}" VerticalAlignment="Center" />
+                      <ComboBox Name="LanguageBox" Grid.Column="1" Classes="field" Width="180" VerticalAlignment="Center"
+                                ItemsSource="{x:Static vm:SettingsViewModel.Languages}" SelectedItem="{Binding Settings.Language}" />
+                    </Grid>
+                  </Border>
+                  <CheckBox Name="TranscribeSwitch" Theme="{StaticResource SettingSwitch}" Height="44" Foreground="{StaticResource Text2Brush}"
+                            Content="Transcribe new videos automatically" IsChecked="{Binding Settings.TranscribeOnOpen}" />
+                </StackPanel>
+              </StackPanel>
+
+              <!-- 4 · Connect Claude: the command or config entry of Settings → MCP server, and a button that sets it up. -->
+              <StackPanel Name="ClaudeStep" Spacing="10" IsVisible="{Binding IsConnectClaude}">
+                <Grid ColumnDefinitions="*,Auto">
+                  <TextBlock Classes="heading" Text="Connect Claude" />
+                  <Border Name="StatusBadge" Grid.Column="1" Height="22" Padding="8,0" CornerRadius="5.26" BorderThickness="1"
+                          VerticalAlignment="Center" Classes.on="{Binding IsClaudeConnected}">
+                    <StackPanel Orientation="Horizontal" Spacing="6">
+                      <Panel Width="5" Height="5" VerticalAlignment="Center">
+                        <Ellipse Name="WaitDot" Width="5" Height="5" Fill="{StaticResource TextBrush}" IsVisible="{Binding !IsClaudeConnected}" />
+                        <Ellipse Name="OnDot" Width="5" Height="5" Fill="{StaticResource StatusOnBrush}" IsVisible="{Binding IsClaudeConnected}"
+                                 Effect="drop-shadow(0 0 4 #8C22C55E)" />
+                      </Panel>
+                      <TextBlock Name="StatusText" Text="{Binding ClaudeStatusText}" FontSize="10.5" FontWeight="Medium" VerticalAlignment="Center" />
+                    </StackPanel>
+                  </Border>
+                </Grid>
+                <TextBlock Classes="body"
+                           Text="Ask Claude to find a quote, trim silences or export. It works in this window, and asks before saving or exporting." />
+                <StackPanel Margin="0,14,0,0" Spacing="10">
+                  <Border Background="{StaticResource FieldBrush}" CornerRadius="8" Padding="2" HorizontalAlignment="Left">
+                    <ItemsControl ItemsSource="{Binding ClientOptions}">
+                      <ItemsControl.ItemsPanel>
+                        <ItemsPanelTemplate>
+                          <StackPanel Orientation="Horizontal" Spacing="2" />
+                        </ItemsPanelTemplate>
+                      </ItemsControl.ItemsPanel>
+                      <ItemsControl.ItemTemplate>
+                        <DataTemplate x:DataType="vm:ChoiceOption">
+                          <Button Classes="client" Classes.on="{Binding IsSelected}" Content="{Binding Label}" Command="{Binding PickCommand}" />
+                        </DataTemplate>
+                      </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                  </Border>
+                  <TextBlock Text="{Binding CommandHint}" FontSize="12" Foreground="{StaticResource Text2Brush}" TextWrapping="Wrap" />
+                  <Border CornerRadius="8" Background="{StaticResource WindowBrush}" BorderBrush="#14FFFFFF" BorderThickness="1">
+                    <Panel>
+                      <ScrollViewer MaxHeight="150" Margin="14,12,76,12" HorizontalScrollBarVisibility="Disabled">
+                        <SelectableTextBlock Name="CommandText" Text="{Binding Command}" FontFamily="{StaticResource MonoFont}" FontSize="11.5"
+                                             LineHeight="17.8" Foreground="{StaticResource Text2Brush}" TextWrapping="Wrap" />
+                      </ScrollViewer>
+                      <Button Name="CopyButton" Classes="soft" Height="26" Padding="12,0" CornerRadius="6" FontSize="11.5" Margin="0,8,8,0"
+                              HorizontalAlignment="Right" VerticalAlignment="Top" Content="{Binding CopyLabel}" Command="{Binding CopyCommand}" />
+                    </Panel>
+                  </Border>
+                  <StackPanel Orientation="Horizontal" Spacing="10">
+                    <Button Name="SetupButton" Classes="bone" Height="30" Padding="14,0" CornerRadius="6" FontSize="12" FontWeight="Medium"
+                            Command="{Binding RunSetupCommand}">
+                      <StackPanel Orientation="Horizontal" Spacing="8">
+                        <TextBlock Classes="mono" Text="&gt;_" FontSize="11" FontWeight="Medium" VerticalAlignment="Center" />
+                        <TextBlock Text="{Binding SetupLabel}" VerticalAlignment="Center" />
+                      </StackPanel>
+                    </Button>
+                    <TextBlock Name="SetupNote" Text="{Binding SetupNote}" FontSize="11" Foreground="{StaticResource MutedBrush}"
+                               VerticalAlignment="Center" TextWrapping="Wrap" MaxWidth="360" />
+                  </StackPanel>
+                  <TextBlock Text="You can do this later in Settings → MCP server." FontSize="11" Foreground="{StaticResource MutedBrush}" />
+                </StackPanel>
+              </StackPanel>
+            </Panel>
+
+            <Grid Grid.Row="1" ColumnDefinitions="*,Auto" Margin="20,16">
+              <TextBlock Name="StepText" Classes="mono" Text="{Binding StepText}" FontSize="10.5" Foreground="{StaticResource MutedBrush}"
+                         Margin="16,0,0,0" VerticalAlignment="Center" />
+              <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6">
+                <Button Name="BackButton" Classes="soft" Height="30" Padding="12,0" CornerRadius="10" FontSize="12.5" Content="Back"
+                        IsVisible="{Binding HasBack}" Command="{Binding BackCommand}" />
+                <Button Name="NextButton" Classes="bone" Height="30" Padding="16,0" FontWeight="Normal" Command="{Binding NextCommand}">
+                  <StackPanel Orientation="Horizontal" Spacing="8">
+                    <TextBlock Text="{Binding NextLabel}" VerticalAlignment="Center" />
+                    <Border Height="16" Padding="5,0" CornerRadius="4" BorderThickness="1" BorderBrush="#40333333" VerticalAlignment="Center"
+                            IsVisible="{Binding IsLast}">
+                      <TextBlock Classes="mono" Text="{Binding Settings.Keys.OpenVideo}" FontSize="10" FontWeight="Medium" Foreground="#666666"
+                                 VerticalAlignment="Center" />
+                    </Border>
+                  </StackPanel>
+                </Button>
+              </StackPanel>
+            </Grid>
+          </Grid>
+        </Grid>
+      </Border>
+    </Border>
+
+    <!-- After the tour: where to find it again. Low in the preview, above the player controls, centred. -->
+    <Border Name="ReopenNote" IsVisible="{Binding IsNoteVisible}" HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="0,0,0,312"
+            Padding="16,10,10,10" CornerRadius="12" Background="{StaticResource DialogBrush}"
+            BoxShadow="inset 0 1 0 0 #17FFFFFF, 0 0 0 1 #1FFFFFFF, 0 16 36 0 #73000000">
+      <StackPanel Orientation="Horizontal" Spacing="16">
+        <TextBlock Text="Reopen the tour anytime from the project menu → Welcome tour." FontSize="12.5" Foreground="{StaticResource Text2Brush}"
+                   VerticalAlignment="Center" />
+        <Button Name="ReplayButton" Classes="soft" Height="28" Padding="12,0" Content="Replay" Command="{Binding OpenCommand}" />
+      </StackPanel>
+    </Border>
+  </Panel>
+
+  <UserControl.Styles>
+    <Style Selector="TextBlock.heading">
+      <Setter Property="FontSize" Value="28" />
+      <Setter Property="LetterSpacing" Value="-0.7" />
+      <Setter Property="LineHeight" Value="32" />
+      <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
+    </Style>
+    <Style Selector="TextBlock.body">
+      <Setter Property="FontSize" Value="13" />
+      <Setter Property="LineHeight" Value="20" />
+      <Setter Property="Foreground" Value="{StaticResource Text4Brush}" />
+      <Setter Property="TextWrapping" Value="Wrap" />
+      <Setter Property="MaxWidth" Value="460" />
+      <Setter Property="HorizontalAlignment" Value="Left" />
+    </Style>
+    <Style Selector="Border.card">
+      <Setter Property="CornerRadius" Value="12" />
+      <Setter Property="Background" Value="{StaticResource PanelDeepBrush}" />
+      <Setter Property="BorderBrush" Value="{StaticResource DividerBrush}" />
+      <Setter Property="BorderThickness" Value="1" />
+    </Style>
+
+    <!-- Step list rows. -->
+    <Style Selector="Button.step">
+      <Setter Property="Height" Value="40" />
+      <Setter Property="Padding" Value="8,0" />
+      <Setter Property="CornerRadius" Value="8" />
+      <Setter Property="FontWeight" Value="Normal" />
+      <Setter Property="HorizontalAlignment" Value="Stretch" />
+      <Setter Property="HorizontalContentAlignment" Value="Left" />
+    </Style>
+    <Style Selector="Button.step:pointerover">
+      <Setter Property="Background" Value="#0AFFFFFF" />
+    </Style>
+    <Style Selector="Button.step.current">
+      <Setter Property="Background" Value="#0FFFFFFF" />
+    </Style>
+    <Style Selector="Button.step Border.num">
+      <Setter Property="BorderBrush" Value="#33FFFFFF" />
+    </Style>
+    <Style Selector="Button.step TextBlock">
+      <Setter Property="Foreground" Value="{StaticResource MutedBrush}" />
+    </Style>
+    <Style Selector="Button.step.done TextBlock">
+      <Setter Property="Foreground" Value="{StaticResource Text2Brush}" />
+    </Style>
+    <Style Selector="Button.step.current TextBlock.title">
+      <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
+    </Style>
+    <Style Selector="Button.step.current Border.num">
+      <Setter Property="Background" Value="{StaticResource BoneBrush}" />
+      <Setter Property="BorderBrush" Value="{StaticResource BoneBrush}" />
+    </Style>
+    <Style Selector="Button.step.current Border.num > TextBlock">
+      <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
+    </Style>
+
+    <!-- Skip tour: text only, a faint fill on hover. -->
+    <Style Selector="Button.quiet">
+      <Setter Property="CornerRadius" Value="8" />
+      <Setter Property="FontWeight" Value="Normal" />
+      <Setter Property="Foreground" Value="{StaticResource Text2Brush}" />
+    </Style>
+    <Style Selector="Button.quiet:pointerover">
+      <Setter Property="Background" Value="{StaticResource ControlBrush}" />
+      <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
+    </Style>
+
+    <!-- Sample timeline clips: the low-alpha blue of included clips, stripes for the one left out. -->
+    <Style Selector="Border.clip">
+      <Setter Property="Margin" Value="0,5" />
+      <Setter Property="CornerRadius" Value="4" />
+      <Setter Property="ClipToBounds" Value="True" />
+      <Setter Property="Background" Value="#2E3B82F6" />
+      <Setter Property="BorderBrush" Value="#8C60A5FA" />
+      <Setter Property="BorderThickness" Value="1" />
+    </Style>
+    <Style Selector="Border.clip TextBlock">
+      <Setter Property="FontSize" Value="10.5" />
+      <Setter Property="Margin" Value="7,0,0,0" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+      <Setter Property="Foreground" Value="{StaticResource Text2Brush}" />
+      <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+    </Style>
+    <Style Selector="Border.clip.off">
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="BorderBrush" Value="#1FFFFFFF" />
+    </Style>
+    <Style Selector="Border.clip.off TextBlock">
+      <Setter Property="Foreground" Value="{StaticResource Muted3Brush}" />
+    </Style>
+
+    <!-- Key cap of the Shortcuts step: 22 px, charcoal, a hairline ring and a dark bottom edge. -->
+    <Style Selector="Border.keycap">
+      <Setter Property="MinWidth" Value="22" />
+      <Setter Property="Height" Value="22" />
+      <Setter Property="Padding" Value="7,0" />
+      <Setter Property="CornerRadius" Value="5" />
+      <Setter Property="Background" Value="{StaticResource FieldBrush}" />
+      <Setter Property="BoxShadow" Value="inset 0 -1 0 0 #80000000, 0 0 0 1 #29FFFFFF" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+    <Style Selector="Border.keycap > TextBlock">
+      <Setter Property="FontFamily" Value="{StaticResource MonoFont}" />
+      <Setter Property="FontSize" Value="11" />
+      <Setter Property="FontWeight" Value="Medium" />
+      <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
+      <Setter Property="HorizontalAlignment" Value="Center" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+
+    <!-- Claude Code / Claude Desktop. -->
+    <Style Selector="Button.client">
+      <Setter Property="Height" Value="26" />
+      <Setter Property="Padding" Value="12,0" />
+      <Setter Property="CornerRadius" Value="6" />
+      <Setter Property="FontWeight" Value="Normal" />
+      <Setter Property="Foreground" Value="{StaticResource Text4Brush}" />
+    </Style>
+    <Style Selector="Button.client:pointerover">
+      <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
+    </Style>
+    <Style Selector="Button.client.on">
+      <Setter Property="Background" Value="#1AFFFFFF" />
+      <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
+    </Style>
+
+    <!-- Status badge: neutral and blinking while waiting, green once Claude is connected. -->
+    <Style Selector="Border#StatusBadge">
+      <Setter Property="BorderBrush" Value="#29FFFFFF" />
+    </Style>
+    <Style Selector="Border#StatusBadge TextBlock#StatusText">
+      <Setter Property="Foreground" Value="{StaticResource Text2Brush}" />
+    </Style>
+    <Style Selector="Border#StatusBadge.on">
+      <Setter Property="BorderBrush" Value="#994ADE80" />
+    </Style>
+    <Style Selector="Border#StatusBadge.on TextBlock#StatusText">
+      <Setter Property="Foreground" Value="{StaticResource StatusOnBrush}" />
+    </Style>
+    <Style Selector="Ellipse#WaitDot">
+      <Style.Animations>
+        <Animation Duration="0:0:1.4" IterationCount="Infinite" Easing="SineEaseInOut">
+          <KeyFrame Cue="0%"><Setter Property="Opacity" Value="1" /></KeyFrame>
+          <KeyFrame Cue="50%"><Setter Property="Opacity" Value="0.2" /></KeyFrame>
+          <KeyFrame Cue="100%"><Setter Property="Opacity" Value="1" /></KeyFrame>
+        </Animation>
+      </Style.Animations>
+    </Style>
+  </UserControl.Styles>
+</UserControl>

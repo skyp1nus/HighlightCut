@@ -15,6 +15,23 @@ public static class Shortcuts
             return true;
         }
 
+        // The welcome tour: Esc skips it, the Open video key (shown on its last step) finishes it; nothing else runs under it.
+        var tour = editor.Tour;
+        if (tour.IsOpen)
+        {
+            if (key == Key.Escape && mods == KeyModifiers.None)
+            {
+                tour.Close();
+                return true;
+            }
+            if (KeyCombo.From(key, mods) is { } openKey && editor.Settings.KeyMap.Find(openKey) == ShortcutAction.OpenVideo)
+            {
+                tour.Finish();
+                return true;
+            }
+            return false;
+        }
+
         var export = editor.Export;
         if (export.IsDialogOpen)
         {
