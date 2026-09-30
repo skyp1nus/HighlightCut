@@ -108,11 +108,15 @@ above for now.
 
 ## Download
 
-Every CI run builds a ready-to-run Windows folder: open the latest run under
-[Actions](https://github.com/skyp1nus/OurCut/actions), download **HighlightCut-win-x64**, unzip it and start
-`HighlightCut.exe`. It includes .NET, ffmpeg, ffprobe and libmpv, so nothing else needs installing. Tagged versions
-(`v*`) are published under [Releases](https://github.com/skyp1nus/OurCut/releases), with the notes from
-[CHANGELOG.md](CHANGELOG.md); the app shows them once after an update (project menu → What’s new).
+Windows 10/11, 64-bit: download `HighlightCut-X.Y.Z-windows-x64.zip` from the
+[latest release](https://github.com/skyp1nus/HighlightCut/releases/latest), unzip it anywhere and start
+`HighlightCut.exe`. It includes .NET, ffmpeg, ffprobe and libmpv, so nothing else needs installing. The build isn’t
+signed yet, so Windows SmartScreen may warn you: click More info → Run anyway. Each release has the notes from
+[CHANGELOG.md](CHANGELOG.md) and, in Ukrainian, [CHANGELOG.uk.md](CHANGELOG.uk.md); the app shows the English ones
+once after an update (project menu → What’s new).
+
+Every CI run also builds the same folder: open the latest run under
+[Actions](https://github.com/skyp1nus/HighlightCut/actions) and download **HighlightCut-win-x64**.
 
 If something goes wrong, the details are in `%LOCALAPPDATA%\HighlightCut\logs`. Settings, the recent files list and
 the preview cache are in `%LOCALAPPDATA%\HighlightCut`.

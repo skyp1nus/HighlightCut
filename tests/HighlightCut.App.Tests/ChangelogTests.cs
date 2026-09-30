@@ -16,11 +16,11 @@ public class ChangelogTests
 
         - Something not released yet.
 
-        ## 0.3.0 — 2026-12-01
+        ## 0.3.0 — 2026-12-01 — Chapters 📖
 
         ### New
 
-        - Chapters in the export.
+        - **Chapters.** In the export.
         - A long line that goes on
           onto the next one.
 
@@ -44,16 +44,23 @@ public class ChangelogTests
     {
         var log = Changelog.Parse(Sample.Replace("\n", "\r\n", StringComparison.Ordinal));
 
-        Assert.Equal(["Unreleased", "0.3.0 — 2026-12-01", "0.2.0 – 2026-11-01", "0.1.0"], log.Releases.Select(r => r.Heading));
+        Assert.Equal(["Unreleased", "0.3.0 — 2026-12-01 — Chapters 📖", "0.2.0 – 2026-11-01", "0.1.0"], log.Releases.Select(r => r.Heading));
         Assert.Null(log.Releases[0].Version);
+        Assert.Equal("Unreleased", log.Releases[0].Label);
         var v3 = log.Releases[1];
         Assert.Equal(new Version(0, 3, 0), v3.Version);
         Assert.Equal("2026-12-01", v3.Date);
+        Assert.Equal("Chapters 📖", v3.Codename);
+        Assert.Equal("Chapters", v3.Name);
+        Assert.Equal("0.3.0 — 2026-12-01 — Chapters", v3.Label);
         Assert.Equal(["New", "Fixed"], v3.Groups.Select(g => g.Title));
-        Assert.Equal(["Chapters in the export.", "A long line that goes on onto the next one."], v3.Groups[0].Items);
-        Assert.Equal(["Undo after a split."], v3.Groups[1].Items);
+        Assert.Equal([new ChangelogItem("Chapters.", " In the export."), new ChangelogItem("", "A long line that goes on onto the next one.")], v3.Groups[0].Items);
+        Assert.Equal("**Chapters.** In the export.", v3.Groups[0].Items[0].ToString());
+        Assert.Equal(["Undo after a split."], v3.Groups[1].Items.Select(i => i.Text));
         Assert.Equal("2026-11-01", log.Releases[2].Date);
-        Assert.Equal(["Faster opening."], log.Releases[2].Groups[0].Items);
+        Assert.Null(log.Releases[2].Codename);
+        Assert.Equal("0.2.0 — 2026-11-01", log.Releases[2].Label);
+        Assert.Equal(["Faster opening."], log.Releases[2].Groups[0].Items.Select(i => i.Text));
         Assert.Null(log.Releases[3].Date);
         Assert.True(log.Releases[3].IsEmpty);
     }
@@ -72,6 +79,27 @@ public class ChangelogTests
         Assert.Empty(log.Since(null, new Version(0, 1, 0)));
         Assert.Empty(Changelog.Parse("").Releases);
     }
+
+    [Theory]
+    [InlineData("**Clips snap.** Trim a clip.", "Clips snap.", " Trim a clip.")]
+    [InlineData("**Bold only.**", "Bold only.", "")]
+    [InlineData("No lead, **bold** later.", "", "No lead, **bold** later.")]
+    [InlineData("**Not closed.", "", "**Not closed.")]
+    [InlineData("****", "", "****")]
+    public void A_bullet_has_a_bold_lead(string markdown, string lead, string text)
+    {
+        var item = ChangelogItem.Parse(markdown);
+        Assert.Equal(lead, item.Lead);
+        Assert.Equal(text, item.Text);
+        Assert.Equal(markdown, item.ToString());
+    }
+
+    [Theory]
+    [InlineData("First Cut ✂️", "First Cut")]
+    [InlineData("Unblocked 🔓", "Unblocked")]
+    [InlineData("Family 👨‍👩‍👧 Time", "Family Time")]
+    [InlineData("Plain", "Plain")]
+    public void Emoji_are_left_out_of_the_codename(string codename, string name) => Assert.Equal(name, Changelog.WithoutEmoji(codename));
 
     [Theory]
     [InlineData("0.1.0+4f2a9c1", "0.1.0")]
@@ -98,17 +126,40 @@ public class ChangelogTests
         var notes = Changelog.Embedded.Find(AppVersion.Release);
         Assert.True(notes is { IsEmpty: false }, $"CHANGELOG.md has no notes under ## {AppVersion.Release.ToString(3)}.");
         Assert.NotNull(notes!.Date);
+        Assert.NotNull(notes.Name);
         Assert.Equal("Unreleased", Changelog.Embedded.Releases[0].Heading);
+        // Every bullet starts with a bold lead, which What's new shows in bold.
+        Assert.All(Changelog.Embedded.Releases.SelectMany(r => r.Groups).SelectMany(g => g.Items), i => Assert.True(i.HasLead, i.Text));
+    }
+
+    [Fact]
+    public void The_ukrainian_notes_mirror_the_english_ones()
+    {
+        // scripts/release-notes.py checks the same in the Changelog workflow; this catches it in the tests too.
+        var uk = Changelog.Parse(File.ReadAllText(Path.Combine(RepositoryRoot(), "CHANGELOG.uk.md")));
+        var en = Changelog.Embedded;
+        Assert.Equal(en.Releases.Select(r => r.Heading), uk.Releases.Select(r => r.Heading));
+        var names = new Dictionary<string, string> { ["New"] = "Нове", ["Improved"] = "Покращено", ["Fixed"] = "Виправлено" };
+        foreach (var (e, u) in en.Releases.Zip(uk.Releases))
+        {
+            Assert.Equal(e.Groups.Select(g => (names[g.Title], g.Items.Count)), u.Groups.Select(g => (g.Title, g.Items.Count)));
+            Assert.All(u.Groups.SelectMany(g => g.Items), i => Assert.True(i.HasLead, i.Text));
+        }
     }
 
     [Fact]
     public void The_app_has_the_repository_changelog()
     {
+        var file = Changelog.Parse(File.ReadAllText(Path.Combine(RepositoryRoot(), "CHANGELOG.md")));
+        Assert.Equal(file.Releases.Select(r => r.Heading), Changelog.Embedded.Releases.Select(r => r.Heading));
+    }
+
+    private static string RepositoryRoot()
+    {
         var dir = new DirectoryInfo(AppContext.BaseDirectory);
         while (dir is not null && !File.Exists(Path.Combine(dir.FullName, "HighlightCut.slnx")))
             dir = dir.Parent;
         Assert.NotNull(dir);
-        var file = Changelog.Parse(File.ReadAllText(Path.Combine(dir!.FullName, "CHANGELOG.md")));
-        Assert.Equal(file.Releases.Select(r => r.Heading), Changelog.Embedded.Releases.Select(r => r.Heading));
+        return dir!.FullName;
     }
 }

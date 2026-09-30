@@ -15,8 +15,11 @@ screenshots to `artifacts/screenshots/`: look at the ones your change affects. `
 ## Conventions
 
 - **Changelog**: every user-visible change adds a bullet under `## Unreleased` in [CHANGELOG.md](CHANGELOG.md), in
-  New, Improved or Fixed, in the same pull request. Plain words about what users notice. A PR without one needs
-  `[no changelog]` in its title or the `no-changelog` label. Releasing: [docs/releasing.md](docs/releasing.md).
+  New, Improved or Fixed, in the same pull request, and the same bullet in Ukrainian in
+  [CHANGELOG.uk.md](CHANGELOG.uk.md) (Нове, Покращено, Виправлено). Each bullet starts with a bold lead
+  (`- **Clips snap together.** Trim a clip…`), then plain words about what users notice. Both files keep the same
+  sections and bullet counts; `python3 scripts/release-notes.py` checks that and previews the release. A PR without a
+  bullet needs `[no changelog]` in its title or the `no-changelog` label. Releasing: [docs/releasing.md](docs/releasing.md).
 - **Version**: only `<Version>` in Directory.Build.props; bump it only when releasing.
 - Match the surrounding code: its comment density and naming, CommunityToolkit `[ObservableProperty]` /
   `[RelayCommand]`, and plain English UI text with curly apostrophes (’).
