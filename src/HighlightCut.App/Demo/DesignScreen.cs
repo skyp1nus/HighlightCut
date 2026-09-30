@@ -30,4 +30,7 @@ public enum DesignScreen
 
     /// <summary>The welcome tour's last step, Connect Claude, waiting for Claude.</summary>
     WelcomeClaude,
+
+    /// <summary>What's new after an update, over the sample project.</summary>
+    WhatsNew,
 }

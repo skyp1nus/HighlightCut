@@ -2,6 +2,7 @@ namespace HighlightCut.App.Services;
 
 /// <summary>Everything the settings dialog saves. A section missing from an older file reads as null: its defaults.</summary>
 /// <param name="WelcomeTourSeen">The welcome tour was finished or skipped once; it no longer opens by itself.</param>
+/// <param name="LastSeenVersion">The version whose What's new was shown last (or that started first); null before versions.</param>
 public sealed record AppSettings(
     TranscriptionSettings Transcription,
     GeneralSettings? General = null,
@@ -10,7 +11,8 @@ public sealed record AppSettings(
     KeyboardSettings? Keyboard = null,
     McpSettings? Mcp = null,
     TimelineSettings? Timeline = null,
-    bool WelcomeTourSeen = false)
+    bool WelcomeTourSeen = false,
+    string? LastSeenVersion = null)
 {
     public static AppSettings Default { get; } = new(new TranscriptionSettings());
 }

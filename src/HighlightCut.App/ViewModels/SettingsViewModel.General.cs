@@ -1,5 +1,4 @@
 using System.Globalization;
-using System.Reflection;
 using System.Runtime.InteropServices;
 using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -244,9 +243,5 @@ public sealed partial class SettingsViewModel
         return space > 0 ? v[..space] : v;
     }
 
-    private static string ReadAppVersion()
-    {
-        string? version = typeof(SettingsViewModel).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
-        return version?.Split('+')[0] ?? "—";
-    }
+    private static string ReadAppVersion() => Services.AppVersion.Text is { Length: > 0 } version ? version : "—";
 }
