@@ -12,6 +12,8 @@ See [docs/releasing.md](docs/releasing.md).
 
 - The welcome tour offers the transcription model download on its Transcript step and explains the timeline chips.
 - The welcome tour works from the keyboard (Enter, the arrow keys, Tab stays in the dialog) and fits smaller windows.
+- Connect Claude, in the welcome tour and Settings → MCP server, adds HighlightCut to Claude Code and Claude Desktop in one click. It replaces an old or moved entry, and says clearly when Claude Code isn’t installed.
+- Adding to Claude Desktop keeps your other servers and settings and saves a backup of the old file.
 
 ## 0.1.0 — 2026-09-30
 
