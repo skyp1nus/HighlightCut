@@ -34,7 +34,7 @@ public interface IEditorContext
     int? SelectedClipId { get; }
     bool IsPlaying { get; }
 
-    /// <summary>Keyframe times of the source, sorted (empty until scanned).</summary>
+    /// <summary>Keyframe times of every video, on the timeline, sorted (empty until scanned).</summary>
     IReadOnlyList<double> Keyframes { get; }
 
     /// <summary>
@@ -44,7 +44,7 @@ public interface IEditorContext
     Task<IReadOnlyList<double>> ReadKeyframesAsync(CancellationToken cancellationToken) => Task.FromResult(Keyframes);
 
     /// <summary>
-    /// Reads all of the source's audio if it is not yet (the editor reads it only while the user's Waveform or Silence chip
+    /// Reads all of the videos' audio if it is not yet (the editor reads it only while the user's Waveform or Silence chip
     /// is on) and waits for it, so <see cref="FindSilences"/> then covers the whole file.
     /// </summary>
     Task ReadAudioAsync(CancellationToken cancellationToken) => Task.CompletedTask;
@@ -104,13 +104,13 @@ public interface IEditorContext
     Task<string?> SaveAsync(string? path, CancellationToken cancellationToken);
 }
 
-/// <summary>Silences found in the source's audio.</summary>
+/// <summary>Silences found in the videos' audio, on the timeline.</summary>
 /// <param name="ThresholdDb">Peak level (dBFS) below which audio counted as silent.</param>
 /// <param name="NoiseFloorDb">Level of the quietest 5 % of the audio: roughly the background noise.</param>
 /// <param name="IsComplete">False while the audio is still being read, or if not all of it could be.</param>
 public sealed record SilenceReport(IReadOnlyList<TimeRange> Ranges, double ThresholdDb, double NoiseFloorDb, bool IsComplete);
 
-/// <summary>Scene changes found in the source's video.</summary>
+/// <summary>Scene changes found in the videos, on the timeline.</summary>
 /// <param name="IsComplete">False while detection is still running; <paramref name="Times"/> covers the part scanned.</param>
 /// <param name="Progress">Part of the video scanned, 0..1.</param>
 public sealed record SceneReport(IReadOnlyList<double> Times, bool IsComplete, double Progress);
