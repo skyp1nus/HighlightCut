@@ -27,8 +27,9 @@ public sealed class ProjectChangedEventArgs(ProjectChangeKind kind, Project prev
 }
 
 /// <summary>
-/// The editing API for one open project. The UI and a future MCP server call the same methods;
-/// each edit becomes a command in <see cref="History"/>.
+/// The editing API for one open project. The UI and the MCP server call the same methods;
+/// each edit becomes a command in <see cref="History"/>. The helpers take timeline seconds (the videos end to end, what
+/// the user sees) and map them onto the videos; the commands themselves take seconds on one video.
 /// </summary>
 /// <remarks>Not thread-safe: call it from one thread (the UI thread) and marshal other callers to it.</remarks>
 public sealed class EditorSession
@@ -45,7 +46,10 @@ public sealed class EditorSession
 
     public History History { get; }
 
-    /// <summary>Sorted keyframe times of the source, used for snapping.</summary>
+    /// <summary>
+    /// Sorted keyframe times on the timeline, used for snapping: each video's keyframes moved by its offset. Whoever sets
+    /// them sets them again when the videos change.
+    /// </summary>
     public IReadOnlyList<double> Keyframes
     {
         get => _keyframes;
@@ -75,6 +79,7 @@ public sealed class EditorSession
         if (ReferenceEquals(after, before))
             return null;
         EditRules.ValidateNoNewOverlap(before, after);
+        EditRules.ValidateClipSources(after);
         var entry = History.Push(new HistoryEntry(command, command.Describe(before), before, after, origin,
             DateTimeOffset.Now, mergeKey));
         Project = after;
@@ -175,66 +180,94 @@ public sealed class EditorSession
 
     // ---- Operations --------------------------------------------------------------------------
 
-    /// <summary>Adds a clip at the end of the output (or at <paramref name="index"/>).</summary>
+    /// <summary>
+    /// Adds a clip for a timeline range at the end of the output (or at <paramref name="index"/>). A range over a join
+    /// becomes one clip per video, in one undo step (see <see cref="TimelineEdits.AddRange"/>). Returns the first.
+    /// </summary>
     public Clip AddClip(double start, double end, string? label = null, int? index = null, EditOrigin origin = EditOrigin.User)
     {
         int id = Project.NextClipId;
-        Execute(new AddClipCommand(start, end, label, index, id), origin);
+        Execute(TimelineEdits.AddRange(Project, start, end, label, index), origin);
         return Project.Get(id);
     }
 
     /// <summary>
-    /// Adds a clip for a source range, placed among the clips by source position ("+ Keep", "Keep as clip"). Clips do not
-    /// overlap, so the range is cut down to its free part (see <see cref="Project.FreeRange"/>).
+    /// Adds a clip for a timeline range, placed among the clips by timeline position ("+ Keep", "Keep as clip"). Clips do
+    /// not overlap, so the range is cut down to its free part (see <see cref="Project.FreeTimelineRange"/>); a free part
+    /// over a join becomes one clip per video, in one undo step. Returns the first new clip.
     /// </summary>
     /// <exception cref="EditException">Other clips already cover the range, or all but a sliver of it.</exception>
     public Clip KeepRange(double start, double end, string? label = null, EditOrigin origin = EditOrigin.User)
     {
-        var free = Project.FreeRange(start, end);
-        if (free is not { } range)
+        var project = Project;
+        List<SourceRange> parts = project.FreeTimelineRange(start, end) is { } free
+            ? [.. project.SplitAtSources(free.Start, free.End).Where(p => p.Duration >= EditRules.MinClipDuration - EditRules.Epsilon)]
+            : [];
+        if (parts.Count == 0)
         {
-            throw new EditException(Project.FirstOverlapping(start, end) is { } clip
-                ? $"That is already in clip {Project.NumberOf(clip.Id)}."
+            throw new EditException(project.FirstOverlappingOnTimeline(start, end) is { } clip
+                ? $"That is already in clip {project.NumberOf(clip.Id)}."
                 : $"Clips must be at least {EditRules.MinClipDuration} s long.");
         }
-        int index = Project.Clips.FindIndex(c => c.Start > range.Start);
-        return AddClip(range.Start, range.End, label, index < 0 ? Project.Clips.Count : index, origin);
+        // Each part goes before the first clip (in output order) that starts after it on the timeline.
+        var adds = new List<IEditCommand>();
+        var next = project;
+        foreach (var part in parts)
+        {
+            double at = next.ToTimeline(part.SourceId, part.Start);
+            int index = next.Clips.FindIndex(c => next.TimelineRange(c).Start > at);
+            var add = new AddClipCommand(part.Start, part.End, label, index < 0 ? next.Clips.Count : index, next.NextClipId,
+                SourceId: part.SourceId);
+            next = add.Apply(next);
+            adds.Add(add);
+        }
+        int first = project.NextClipId;
+        Execute(adds.Count == 1 ? adds[0] : new BatchCommand("add_segment", $"Added {adds.Count} clips, one per video", adds), origin);
+        return Project.Get(first);
     }
 
-    public void SetRange(int clipId, double start, double end, EditOrigin origin = EditOrigin.User, string? mergeKey = null) =>
-        Execute(new SetClipRangeCommand(clipId, start, end), origin, mergeKey);
+    /// <summary>Sets a clip's in- and out-point, given as timeline times; they must be in the clip's video.</summary>
+    public void SetRange(int clipId, double start, double end, EditOrigin origin = EditOrigin.User, string? mergeKey = null)
+    {
+        var clip = Project.Get(clipId);
+        Execute(new SetClipRangeCommand(clipId, TimelineEdits.OnClipVideo(Project, clip, start), TimelineEdits.OnClipVideo(Project, clip, end)),
+            origin, mergeKey);
+    }
 
     /// <summary>
-    /// Moves one end of a clip, clamped so the clip stays inside the source, at least <see cref="EditRules.MinClipDuration"/>
-    /// long and clear of its neighbours (it stops at their edge). Within <paramref name="snapThreshold"/> seconds
-    /// (0 turns snapping off) the end snaps onto the neighbour's edge, so the two clips touch, or else, with
-    /// <paramref name="snapToKeyframes"/>, onto the nearest keyframe. Returns the new time of that end.
+    /// Moves one end of a clip to a timeline time, clamped so the clip stays inside its video, at least
+    /// <see cref="EditRules.MinClipDuration"/> long and clear of its neighbours in that video (it stops at their edge).
+    /// Within <paramref name="snapThreshold"/> seconds (0 turns snapping off) the end snaps onto the neighbour's edge, so
+    /// the two clips touch, or else, with <paramref name="snapToKeyframes"/>, onto the nearest keyframe. Returns the new
+    /// time of that end on the timeline.
     /// </summary>
     public double Trim(int clipId, ClipEdge edge, double time, double snapThreshold = 0, string? mergeKey = null,
         EditOrigin origin = EditOrigin.User, bool snapToKeyframes = true)
     {
         var clip = Project.Get(clipId);
+        double offset = Project.FindSource(clip.SourceId) is null ? 0 : Project.OffsetOf(clip.SourceId);
+        // On the clip's video: the neighbour's edge and the video's ends are exact there.
         double limit = Project.TrimLimit(clip, edge);
-        double t = snapThreshold > 0 && Math.Abs(time - limit) <= snapThreshold ? limit
-            : Snapping.ToNearest(snapToKeyframes ? Keyframes : [], time, snapThreshold);
+        double t = snapThreshold > 0 && Math.Abs(time - offset - limit) <= snapThreshold ? limit
+            : Snapping.ToNearest(snapToKeyframes ? Keyframes : [], time, snapThreshold) - offset;
         if (edge == ClipEdge.In)
         {
             t = Math.Clamp(t, limit, Math.Max(limit, clip.End - EditRules.MinClipDuration));
-            SetRange(clipId, t, clip.End, origin, mergeKey);
+            Execute(new SetClipRangeCommand(clipId, t, clip.End), origin, mergeKey);
         }
         else
         {
             t = Math.Clamp(t, Math.Min(limit, clip.Start + EditRules.MinClipDuration), limit);
-            SetRange(clipId, clip.Start, t, origin, mergeKey);
+            Execute(new SetClipRangeCommand(clipId, clip.Start, t), origin, mergeKey);
         }
-        return t;
+        return offset + t;
     }
 
     /// <summary>
-    /// Joins a clip with the one right after it on the source timeline (see <see cref="JoinClipsCommand"/>).
+    /// Joins a clip with the one right after it on its video (see <see cref="JoinClipsCommand"/>).
     /// Returns the joined clip.
     /// </summary>
-    /// <exception cref="EditException">There is no clip after it, or the two cannot be joined.</exception>
+    /// <exception cref="EditException">There is no clip after it in its video, or the two cannot be joined.</exception>
     public Clip JoinWithNext(int clipId, EditOrigin origin = EditOrigin.User)
     {
         Execute(JoinClipsCommand.WithNext(Project, clipId), origin);
@@ -254,11 +287,12 @@ public sealed class EditorSession
         }
     }
 
-    /// <summary>Splits a clip at <paramref name="time"/> and returns the second part.</summary>
+    /// <summary>Splits a clip at a timeline time (in the clip's video) and returns the second part.</summary>
     public Clip Split(int clipId, double time, EditOrigin origin = EditOrigin.User)
     {
+        var clip = Project.Get(clipId);
         int id = Project.NextClipId;
-        Execute(new SplitClipCommand(clipId, time), origin);
+        Execute(new SplitClipCommand(clipId, TimelineEdits.OnClipVideo(Project, clip, time)), origin);
         return Project.Get(id);
     }
 
@@ -276,4 +310,22 @@ public sealed class EditorSession
 
     public void Remove(int clipId, EditOrigin origin = EditOrigin.User) =>
         Execute(new RemoveClipCommand(clipId), origin);
+
+    // ---- Videos ------------------------------------------------------------------------------
+
+    /// <summary>Adds a video at the end of the timeline and returns it with the id it got.</summary>
+    public SourceMedia AddSource(SourceMedia source, EditOrigin origin = EditOrigin.User)
+    {
+        int id = Project.NextSourceId;
+        Execute(new AddSourceCommand(source), origin);
+        return Project.GetSource(id);
+    }
+
+    /// <summary>Removes a video and every clip cut from it, as one undo step.</summary>
+    public void RemoveSource(int sourceId, EditOrigin origin = EditOrigin.User) =>
+        Execute(new RemoveSourceCommand(sourceId), origin);
+
+    /// <summary>Moves a video to another place on the timeline (0-based); its clips move with it.</summary>
+    public void MoveSource(int sourceId, int toIndex, EditOrigin origin = EditOrigin.User) =>
+        Execute(new MoveSourceCommand(sourceId, toIndex), origin);
 }

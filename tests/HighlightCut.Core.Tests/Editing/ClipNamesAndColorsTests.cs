@@ -59,7 +59,7 @@ public class ClipNamesTests
     [Fact]
     public void Cut_parts_get_the_next_numbers()
     {
-        var after = new CutRangesCommand([new(20, 22), new(30, 32), new(150, 152)]).Apply(Sample.Project);
+        var after = new CutRangesCommand([new(1, 20, 22), new(1, 30, 32), new(1, 150, 152)]).Apply(Sample.Project);
 
         Assert.Equal(["Intro", "Clip 7", "Clip 8", "Setup", "Clip 9"], after.Clips.Take(5).Select(c => c.Label));
         Assert.Equal(9, after.LastClipId);
@@ -178,7 +178,7 @@ public class ClipColorTests
     [Fact]
     public void Silence_cuts_colour_every_new_part_apart_from_its_neighbours()
     {
-        var pauses = Enumerable.Range(0, 20).Select(k => new TimeRange(250 + k * 7, 251 + k * 7)).ToList();
+        var pauses = Enumerable.Range(0, 20).Select(k => new SourceRange(1, 250 + k * 7, 251 + k * 7)).ToList();
         var after = new CutRangesCommand(pauses).Apply(Sample.Project);
 
         Assert.True(after.Clips.Count > 20);

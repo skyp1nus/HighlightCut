@@ -51,17 +51,17 @@ public static class ClipPalette
 
     /// <summary>
     /// The colour for a new clip with id <paramref name="id"/> inserted at <paramref name="index"/> of
-    /// <paramref name="clips"/> (the output order), starting at <paramref name="start"/>: the palette in turn by id,
-    /// skipping the colours of its neighbours in the output order and on the timeline.
+    /// <paramref name="clips"/> (the output order), starting at <paramref name="start"/> on video <paramref name="sourceId"/>:
+    /// the palette in turn by id, skipping the colours of its neighbours in the output order and on its video.
     /// </summary>
-    public static ClipColor ForNewClip(IReadOnlyList<Clip> clips, int index, int id, double start)
+    public static ClipColor ForNewClip(IReadOnlyList<Clip> clips, int index, int id, double start, int sourceId = SourceMedia.FirstId)
     {
         var avoid = new HashSet<ClipColor>();
         if (index > 0 && index <= clips.Count)
             avoid.Add(clips[index - 1].Color);
         if (index >= 0 && index < clips.Count)
             avoid.Add(clips[index].Color);
-        foreach (var c in TimelineNeighbours(clips, id, start))
+        foreach (var c in TimelineNeighbours(clips, id, start, sourceId))
             avoid.Add(c.Color);
         return Next(id, avoid);
     }
@@ -98,7 +98,7 @@ public static class ClipPalette
                 avoid.Add(result[i - 1].Color);
             if (i + 1 < result.Count && !pending.Contains(result[i + 1].Id))
                 avoid.Add(result[i + 1].Color);
-            foreach (var c in TimelineNeighbours(result.Where(c => !pending.Contains(c.Id)).ToList(), clip.Id, clip.Start))
+            foreach (var c in TimelineNeighbours(result.Where(c => !pending.Contains(c.Id)).ToList(), clip.Id, clip.Start, clip.SourceId))
                 avoid.Add(c.Color);
             result[i] = clip with { Color = Next(clip.Id, avoid) };
             pending.Remove(clip.Id);
@@ -107,13 +107,13 @@ public static class ClipPalette
     }
 
     /// <summary>
-    /// The clips right before and after a range on the source timeline: the one that starts last before it and the one
-    /// that starts first after it.
+    /// The clips right before and after a range on a video: the one that starts last before it and the one that starts
+    /// first after it.
     /// </summary>
-    private static IEnumerable<Clip> TimelineNeighbours(IReadOnlyList<Clip> clips, int id, double start)
+    private static IEnumerable<Clip> TimelineNeighbours(IReadOnlyList<Clip> clips, int id, double start, int sourceId)
     {
         Clip? before = null, after = null;
-        foreach (var c in clips.Where(c => c.Id != id))
+        foreach (var c in clips.Where(c => c.Id != id && c.SourceId == sourceId))
         {
             if (c.Start < start && (before is null || c.Start > before.Start))
                 before = c;

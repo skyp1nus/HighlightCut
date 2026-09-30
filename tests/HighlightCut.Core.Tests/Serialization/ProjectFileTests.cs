@@ -22,7 +22,7 @@ public class ProjectFileTests
     {
         string json = ProjectFile.Serialize(Sample.Project);
         Assert.Contains("\"format\": \"highlightcut-project\"", json, StringComparison.Ordinal);
-        Assert.Contains("\"version\": 1", json, StringComparison.Ordinal);
+        Assert.Contains("\"version\": 2", json, StringComparison.Ordinal);
         Assert.Contains("\"start\": 12.04", json, StringComparison.Ordinal);
         Assert.Contains("\"included\": false", json, StringComparison.Ordinal);
     }
@@ -35,7 +35,7 @@ public class ProjectFileTests
         {
             string video = Path.Combine(dir, "media", "keynote.mp4");
             string projectPath = Path.Combine(dir, "keynote.highlightcut.json");
-            var project = Sample.Project with { Source = Sample.Source with { Path = video } };
+            var project = Sample.Project with { Sources = [Sample.Source with { Path = video }] };
 
             string json = ProjectFile.Serialize(project, projectPath);
             Assert.Contains("\"path\": \"media/keynote.mp4\"", json, StringComparison.Ordinal);
@@ -113,7 +113,7 @@ public class ProjectFileTests
 
         var back = ProjectFile.Deserialize(json);
         Assert.Equal([new TrackMix(2, -6.5, true), new TrackMix(3, 4)], back.AudioMix);
-        Assert.Equal(new TrackMix(1), back.MixOf(1));
+        Assert.Equal(new TrackMix(1), back.MixOf(1, 1));
     }
 
     [Fact]
@@ -129,7 +129,7 @@ public class ProjectFileTests
             """;
         var p = ProjectFile.Deserialize(json);
         Assert.Empty(p.AudioMix);
-        Assert.Equal(0, p.MixOf(2).GainDb);
+        Assert.Equal(0, p.MixOf(1, 2).GainDb);
     }
 
     [Fact]

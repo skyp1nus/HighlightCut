@@ -91,15 +91,18 @@ public sealed partial class EditorViewModel
     {
         var project = Session.Project;
         bool noClips = project.Clips.IsEmpty;
-        var targets = noClips ? [new TimeRange(0, project.SourceDuration)] : project.IncludedClips.Select(c => new TimeRange(c.Start, c.End)).ToList();
+        var targets = noClips ? [new TimeRange(0, project.TimelineDuration)] : project.IncludedClips.Select(project.TimelineRange).ToList();
         if (!targets.Any(c => end > c.Start && start < c.End))
         {
             ShowMessage("Those words are not in the output.");
             return false;
         }
-        IEditCommand cut = new CutRangesCommand([new TimeRange(start, end)], Description: description);
+        IEditCommand cut = new CutRangesCommand(TimelineEdits.ToSources(project, [new TimeRange(start, end)]), Description: description);
         if (noClips)
-            cut = new BatchCommand(cut.Name, description, [new AddClipCommand(0, project.SourceDuration, project.Name), cut]);
+        {
+            cut = new BatchCommand(cut.Name, description,
+                [.. project.Sources.Select(s => new AddClipCommand(0, s.Duration, project.Name, SourceId: s.Id)), cut]);
+        }
         return TryEdit(() => Session.Execute(cut));
     }
 

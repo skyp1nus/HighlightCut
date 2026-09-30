@@ -783,7 +783,8 @@ public sealed partial class ExportViewModel : ViewModelBase
             KeepAllTracks = KeepAllTracks,
             // Muted lanes are left out unless every track is kept.
             AudioStreamIndexes = [.. _editor.AudioLanes.Where(l => !l.IsMuted && l.Stream < tracks.Length).Select(l => tracks[l.Stream].Index)],
-            AudioGainsDb = _editor.Session.Project.AudioMix.Where(m => m.GainDb != 0).ToDictionary(m => m.Index, m => m.GainDb),
+            AudioGainsDb = _editor.Session.Project.AudioMix.Where(m => m.SourceId == _editor.Session.Project.Source?.Id && m.GainDb != 0)
+                .ToDictionary(m => m.Index, m => m.GainDb),
             OutputFolder = OutputFolder,
             BaseName = BaseName,
             FileNamePattern = Pattern,

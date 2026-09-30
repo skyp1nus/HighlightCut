@@ -19,13 +19,14 @@ public sealed record ClipInfo(
     int Id,
     [property: Description("1-based position in the output.")] int Position,
     string Label,
-    [property: Description("Start in seconds on the source timeline.")] double Start,
-    [property: Description("End in seconds on the source timeline.")] double End,
+    [property: Description("Start in seconds on the timeline (the videos end to end).")] double Start,
+    [property: Description("End in seconds on the timeline.")] double End,
     double Duration,
     [property: Description("False for excluded clips: kept in the project, left out of the export.")] bool Included,
     [property: Description("Start–end as MM:SS.mmm, as the editor shows it.")] string Range,
     [property: Description("Colour of the clip in the editor: teal, amber, violet, rose, lime, cyan, orange, indigo, emerald or pink.")]
-    string Color);
+    string Color,
+    [property: Description("Id of the video the clip is cut from (see sources). A clip never runs into the next video.")] int Source);
 
 public sealed record AudioTrackInfo(
     int Track,
@@ -33,11 +34,19 @@ public sealed record AudioTrackInfo(
     [property: Description("Volume set in the editor, in dB: 0 is unchanged, -40 silent. It applies to the preview and the export.")] double VolumeDb,
     [property: Description("Muted in the editor: not heard in the preview, and left out of exports that keep only unmuted tracks.")] bool Muted);
 
-public sealed record SourceInfo(string Path, string Summary, double Duration, double FrameRate, IReadOnlyList<AudioTrackInfo> AudioTracks);
+public sealed record SourceInfo(
+    [property: Description("Stable id of the video in the project; clips name their video by it.")] int Id,
+    string Path,
+    [property: Description("The file name.")] string Name,
+    string Summary,
+    double Duration,
+    [property: Description("Where the video starts on the timeline, in seconds: the length of the videos before it.")] double Offset,
+    double FrameRate,
+    IReadOnlyList<AudioTrackInfo> AudioTracks);
 
 public sealed record ProjectInfo(
     string Name,
-    [property: Description("The open video; null when none is open.")] SourceInfo? Source,
+    [property: Description("The first video (the only one unless the project has several); null when none is open.")] SourceInfo? Source,
     [property: Description("Where the project is saved, if it is.")] string? ProjectFile,
     double Playhead,
     int? SelectedClip,
@@ -45,7 +54,9 @@ public sealed record ProjectInfo(
     [property: Description("Total length of the included clips, in seconds.")] double OutputDuration,
     [property: Description("In output order.")] IReadOnlyList<ClipInfo> Clips,
     [property: Description("Background analysis still running, e.g. \"analysing 45%\".")] string? Analysis,
-    [property: Description("Transcript: done, transcribing 34%, not started (and why)…; read it with get_transcript.")] string? Transcript = null);
+    [property: Description("Transcript: done, transcribing 34%, not started (and why)…; read it with get_transcript.")] string? Transcript = null,
+    [property: Description("Every video of the project in timeline order, end to end on one timeline.")] IReadOnlyList<SourceInfo>? Sources = null,
+    [property: Description("Length of the timeline in seconds: every video end to end.")] double? TimelineDuration = null);
 
 public sealed record EditResult(
     [property: Description("Id of the edit in the history (for revert_action); null if nothing changed.")] long? Action,
@@ -91,8 +102,8 @@ public sealed record MatchesResult(
     [property: Description("done, or how far transcription is: only the part done so far was searched.")] string Status,
     string? Note);
 
-/// <summary>A source range to cut.</summary>
-public sealed record CutRange([property: Description("Seconds.")] double Start, [property: Description("Seconds.")] double End);
+/// <summary>A timeline range to cut.</summary>
+public sealed record CutRange([property: Description("Seconds on the timeline.")] double Start, [property: Description("Seconds on the timeline.")] double End);
 
 public sealed record SilenceInfo(double Start, double End, double Duration,
     [property: Description("Start–end as MM:SS.mmm, as the editor shows it.")] string Range);
@@ -107,7 +118,7 @@ public sealed record SilencesResult(
     string? Note);
 
 public sealed record ScenesResult(
-    [property: Description("Seconds on the source timeline where a new scene starts.")] IReadOnlyList<double> Changes,
+    [property: Description("Seconds on the timeline where a new scene starts.")] IReadOnlyList<double> Changes,
     int Count,
     double Threshold,
     [property: Description("False while detection is still running; the changes found so far are listed.")] bool Complete,
@@ -117,9 +128,9 @@ public sealed record ScenesResult(
 public sealed record EditOperation(
     [property: Description("add, remove, trim, split, join, include, exclude, move, rename or color.")] string Action,
     [property: Description("Clip id (all actions except add); for join, the first of the two clips.")] int? Clip = null,
-    [property: Description("Seconds: the range for add, a new start for trim.")] double? Start = null,
-    [property: Description("Seconds: the range for add, a new end for trim.")] double? End = null,
-    [property: Description("Seconds: where to split.")] double? Time = null,
+    [property: Description("Timeline seconds: the range for add (one clip per video if it crosses a join), a new start for trim.")] double? Start = null,
+    [property: Description("Timeline seconds: the range for add, a new end for trim.")] double? End = null,
+    [property: Description("Timeline seconds: where to split.")] double? Time = null,
     [property: Description("Label for add or rename. Clip names are unique: a taken name is refused on rename and gets \" · 2\" added on add.")]
     string? Label = null,
     [property: Description("1-based output position for add or move.")] int? Position = null,
@@ -135,14 +146,16 @@ public sealed class EditorTools(IEditorHost host)
     public const string ServerName = "highlightcut";
 
     public const string Instructions = """
-        HighlightCut is a video editor for cutting long recordings down to the parts worth keeping. One video is
-        open at a time. Clips are ranges of that video in seconds on its timeline; their order in the project
-        is the order of the output. Parts of the video not covered by an included clip are not exported;
-        excluded clips stay in the project but are not exported either.
+        HighlightCut is a video editor for cutting long recordings down to the parts worth keeping. A project has
+        one video, or several end to end on one timeline (get_project lists them as sources, with where each starts).
+        Clips are ranges of the timeline in seconds, the same times the user sees; a clip belongs to one video and
+        never runs into the next, so a range over the join between two videos becomes one clip per video. The
+        order of the clips in the project is the order of the output. Parts of the timeline not covered by an
+        included clip are not exported; excluded clips stay in the project but are not exported either.
 
-        Start with get_project. Times are seconds (decimals allowed). Clip ids are stable; positions are
-        1-based output positions. Lossless export starts each clip at the keyframe at or before its start;
-        use find_keyframes when exact starts matter.
+        Start with get_project. Times are timeline seconds (decimals allowed); with one video they are seconds on
+        that video. Clip ids are stable; positions are 1-based output positions. Lossless export starts each clip
+        at the keyframe at or before its start; use find_keyframes when exact starts matter.
 
         You cannot see or hear the video, but find_silences shows where the speaker pauses (the first call reads the
         audio, which takes a moment on a long video) and find_scene_changes where the picture changes (a cut, a new slide or window). Scene
@@ -182,7 +195,8 @@ public sealed class EditorTools(IEditorHost host)
     // ---- Reading -------------------------------------------------------------------------
 
     [McpServerTool(Name = "get_project", Title = "Get the project", ReadOnly = true, Idempotent = true)]
-    [Description("The open video, the playhead and every clip in output order. Call this before editing.")]
+    [Description("The videos (sources, in timeline order, with where each starts on the timeline), the playhead and every clip " +
+                 "in output order with its timeline range and video. Call this before editing.")]
     public Task<ProjectInfo> GetProject() => host.RunAsync(ctx => Task.FromResult(Describe(ctx)));
 
     [McpServerTool(Name = "get_history", Title = "List recent edits", ReadOnly = true, Idempotent = true)]
@@ -279,37 +293,39 @@ public sealed class EditorTools(IEditorHost host)
     // ---- Editing -------------------------------------------------------------------------
 
     [McpServerTool(Name = "add_segment", Title = "Keep a range")]
-    [Description("Keeps a range of the source as a new clip. Returns the updated clip list; the new clip is the one with the highest id. " +
+    [Description("Keeps a range of the timeline as a new clip. Returns the updated clip list; the new clip is the one with the highest id. " +
+                 "A range over the join between two videos becomes one clip per video, next to each other in the output. " +
                  "Clips cannot share source time (it would be exported twice): a range that overlaps another clip is refused.")]
     public Task<EditResult> AddSegment(
-        [Description("Seconds.")] double start,
-        [Description("Seconds.")] double end,
+        [Description("Timeline seconds.")] double start,
+        [Description("Timeline seconds.")] double end,
         [Description("Short name shown in the clip list; \"Clip N\" if omitted. A name another clip has gets \" · 2\" added.")]
         string? label = null,
         [Description("1-based output position; the end if omitted.")] int? position = null,
         [Description("teal, amber, violet, rose, lime, cyan, orange, indigo, emerald or pink; by default the next colour its neighbours do not have.")]
         string? color = null) =>
-        Edit(_ => new AddClipCommand(start, end, label, position - 1, Color: color is null ? null : ParseColor(color)));
+        Edit(_ => new AddRangeCommand(start, end, label, position - 1, color is null ? null : ParseColor(color)));
 
     [McpServerTool(Name = "remove_segment", Title = "Remove a clip", Destructive = true)]
     [Description("Removes a clip from the project. To only leave it out of the export, use set_included instead.")]
     public Task<EditResult> RemoveSegment(int clip) => Edit(_ => new RemoveClipCommand(clip));
 
     [McpServerTool(Name = "trim_segment", Title = "Trim a clip")]
-    [Description("Moves a clip's start and/or end. A clip cannot grow into another clip; to make two clips one, use join_segments.")]
-    public Task<EditResult> TrimSegment(int clip, [Description("New start, seconds.")] double? start = null,
-        [Description("New end, seconds.")] double? end = null) =>
+    [Description("Moves a clip's start and/or end. A clip cannot grow into another clip or past the ends of its video; to make " +
+                 "two clips one, use join_segments.")]
+    public Task<EditResult> TrimSegment(int clip, [Description("New start, timeline seconds.")] double? start = null,
+        [Description("New end, timeline seconds.")] double? end = null) =>
         Edit(_ => new PartialTrimCommand(clip, start, end));
 
     [McpServerTool(Name = "split_segment", Title = "Split a clip")]
-    [Description("Splits a clip in two at a source time; the second part gets a new id.")]
-    public Task<EditResult> SplitSegment(int clip, [Description("Seconds, inside the clip.")] double time) =>
-        Edit(_ => new SplitClipCommand(clip, time));
+    [Description("Splits a clip in two at a timeline time; the second part gets a new id.")]
+    public Task<EditResult> SplitSegment(int clip, [Description("Timeline seconds, inside the clip.")] double time) =>
+        Edit(_ => new SplitAtCommand(clip, time));
 
     [McpServerTool(Name = "join_segments", Title = "Join two clips")]
-    [Description("Joins a clip with the clip right after it on the source timeline into one clip, which keeps the first clip's " +
-                 "id, label and inclusion. The two must touch or be less than 0.5 s apart (the gap is kept too) and be next " +
-                 "to each other in the output.")]
+    [Description("Joins a clip with the clip right after it in its video into one clip, which keeps the first clip's " +
+                 "id, label and inclusion. The two must be in the same video, touch or be less than 0.5 s apart (the gap is " +
+                 "kept too) and be next to each other in the output.")]
     public Task<EditResult> JoinSegments([Description("The first of the two clips.")] int clip) =>
         Edit(project => JoinClipsCommand.WithNext(project, clip));
 
@@ -349,7 +365,7 @@ public sealed class EditorTools(IEditorHost host)
 
     [McpServerTool(Name = "cut_silences", Title = "Cut out silences")]
     [Description("Cuts pauses out of the included clips (or the given clips) as one undo step, keeping a little of each " +
-                 "pause so speech does not sound clipped. With no clips yet, it first keeps the whole video. Lossless export " +
+                 "pause so speech does not sound clipped. With no clips yet, it first keeps every video whole. Lossless export " +
                  "starts each clip at the keyframe before it, so many short clips are best exported with re-encoding.")]
     public Task<EditResult> CutSilences(
         [Description("Shortest pause to cut, in seconds (default 1).")] double minDuration = 1.0,
@@ -373,11 +389,11 @@ public sealed class EditorTools(IEditorHost host)
         });
 
     [McpServerTool(Name = "cut_ranges", Title = "Cut out ranges")]
-    [Description("Cuts source ranges (e.g. words or sentences found in the transcript) out of the included clips, or the " +
+    [Description("Cuts timeline ranges (e.g. words or sentences found in the transcript) out of the included clips, or the " +
                  "given clips, as one undo step, trimming or splitting the clips they touch. With no clips yet, it first keeps " +
-                 "the whole video.")]
+                 "every video whole.")]
     public Task<EditResult> CutRanges(
-        [Description("Ranges of the source to remove, in seconds.")] IReadOnlyList<CutRange> ranges,
+        [Description("Ranges of the timeline to remove, in seconds.")] IReadOnlyList<CutRange> ranges,
         [Description("What the cut removes, in a few words; shown to the user, e.g. \"Removed the false start\".")] string description,
         [Description("Clip ids to cut; every included clip if omitted.")] IReadOnlyList<int>? clips = null) =>
         host.RunAsync(ctx =>
@@ -440,7 +456,7 @@ public sealed class EditorTools(IEditorHost host)
 
     [McpServerTool(Name = "seek", Title = "Move the playhead")]
     [Description("Moves the playhead so the user sees that frame; with a clip, also selects it (and goes to its start if no time is given).")]
-    public Task<string> Seek([Description("Seconds.")] double? time = null, [Description("Clip id to select.")] int? clip = null) =>
+    public Task<string> Seek([Description("Timeline seconds.")] double? time = null, [Description("Clip id to select.")] int? clip = null) =>
         host.RunAsync(ctx =>
         {
             RequireFile(ctx);
@@ -448,10 +464,10 @@ public sealed class EditorTools(IEditorHost host)
             {
                 var c = ctx.Session.Project.Find(id) ?? throw new McpException($"Clip {id} does not exist.");
                 ctx.SelectClip(id);
-                time ??= c.Start;
+                time ??= ctx.Session.Project.TimelineRange(c).Start;
             }
             if (time is { } t)
-                ctx.Seek(Math.Clamp(t, 0, ctx.Session.Project.SourceDuration));
+                ctx.Seek(Math.Clamp(t, 0, ctx.Session.Project.TimelineDuration));
             return Task.FromResult($"Playhead at {TimeFormat.Timecode(ctx.Playhead)}.");
         });
 
@@ -773,8 +789,9 @@ public sealed class EditorTools(IEditorHost host)
     }
 
     /// <summary>
-    /// Cuts <paramref name="cuts"/> out of the chosen clips (all included ones if null; the whole video, kept first, if
-    /// there are no clips) as one undo step. <paramref name="describe"/> gets how many ranges touch those clips.
+    /// Cuts <paramref name="cuts"/> (timeline ranges) out of the chosen clips (all included ones if null; every video
+    /// whole, kept first, if there are no clips) as one undo step. <paramref name="describe"/> gets how many ranges touch
+    /// those clips.
     /// </summary>
     private static EditResult CutOut(IEditorContext ctx, IReadOnlyList<TimeRange> cuts, IReadOnlyList<int>? clips, string name,
         Func<int, string> describe, string nothing)
@@ -782,20 +799,20 @@ public sealed class EditorTools(IEditorHost host)
         var project = ctx.Session.Project;
         var steps = new List<IEditCommand>();
         if (clips is null && project.Clips.IsEmpty)
-            steps.Add(new AddClipCommand(0, project.SourceDuration, project.Name));
+            steps.AddRange(project.Sources.Select(s => new AddClipCommand(0, s.Duration, project.Name, SourceId: s.Id)));
         IReadOnlyList<TimeRange> targets = clips is not null
-            ? [.. clips.Select(id => project.Find(id) ?? throw new McpException($"Clip {id} does not exist.")).Select(c => new TimeRange(c.Start, c.End))]
-            : project.Clips.IsEmpty ? [new TimeRange(0, project.SourceDuration)]
-            : [.. project.IncludedClips.Select(c => new TimeRange(c.Start, c.End))];
+            ? [.. clips.Select(id => project.Find(id) ?? throw new McpException($"Clip {id} does not exist.")).Select(project.TimelineRange)]
+            : project.Clips.IsEmpty ? [new TimeRange(0, project.TimelineDuration)]
+            : [.. project.IncludedClips.Select(project.TimelineRange)];
         var hit = cuts.Where(r => targets.Any(c => r.End > c.Start && r.Start < c.End)).ToList();
         if (hit.Count == 0)
             return new EditResult(null, nothing, Clips(project), Round(project.OutputDuration));
         string description = describe(hit.Count);
-        steps.Add(new CutRangesCommand(hit, clips, name, description));
+        steps.Add(new CutRangesCommand(TimelineEdits.ToSources(project, hit), clips, name, description));
         IEditCommand command = steps.Count == 1 ? steps[0] : new BatchCommand(name, description, steps);
         var entry = Guard(() => ctx.Session.Execute(command, EditOrigin.Assistant));
-        // Without clips the whole video was kept first: the cut is measured against it.
-        double before = project.Clips.IsEmpty && clips is null ? project.SourceDuration : project.OutputDuration;
+        // Without clips every video was kept first: the cut is measured against them.
+        double before = project.Clips.IsEmpty && clips is null ? project.TimelineDuration : project.OutputDuration;
         return Result(ctx, entry) with
         {
             Result = $"{description}: {Round(before - ctx.Session.Project.OutputDuration)} s shorter.",
@@ -832,11 +849,11 @@ public sealed class EditorTools(IEditorHost host)
         double Need(double? value, string name) => value ?? throw new EditException($"“{op.Action}” needs {name}.");
         return op.Action.Trim().ToLowerInvariant() switch
         {
-            "add" => new AddClipCommand(Need(op.Start, "start"), Need(op.End, "end"), op.Label, op.Position - 1,
-                Color: op.Color is null ? null : ParseColor(op.Color)),
+            "add" => new AddRangeCommand(Need(op.Start, "start"), Need(op.End, "end"), op.Label, op.Position - 1,
+                op.Color is null ? null : ParseColor(op.Color)),
             "remove" => new RemoveClipCommand(Clip()),
             "trim" => new PartialTrimCommand(Clip(), op.Start, op.End),
-            "split" => new SplitClipCommand(Clip(), Need(op.Time, "time")),
+            "split" => new SplitAtCommand(Clip(), Need(op.Time, "time")),
             "join" => new JoinNextCommand(Clip()),
             "include" => new SetClipIncludedCommand(Clip(), true),
             "exclude" => new SetClipIncludedCommand(Clip(), false),
@@ -861,21 +878,24 @@ public sealed class EditorTools(IEditorHost host)
     internal static ProjectInfo Describe(IEditorContext ctx)
     {
         var project = ctx.Session.Project;
-        var source = ctx.HasFile && project.Source is { } s
-            ? new SourceInfo(s.Path, ctx.SourceSummary ?? Path.GetFileName(s.Path), Round(s.Duration), Math.Round(s.FrameRate, 3),
-                [.. s.AudioTracks.Select((t, i) => TrackInfo(i + 1, t, project.MixOf(t.Index)))])
-            : null;
+        // The summary (codecs, resolution) is the open file's: the first video's.
+        List<SourceInfo> sources = !ctx.HasFile ? [] : [.. project.Sources.Select((s, i) => new SourceInfo(s.Id, s.Path, s.FileName,
+            (i == 0 ? ctx.SourceSummary : null) ?? s.FileName, Round(s.Duration), Round(project.OffsetOf(s.Id)), Math.Round(s.FrameRate, 3),
+            [.. s.AudioTracks.Select((t, k) => TrackInfo(k + 1, t, project.MixOf(s.Id, t.Index)))]))];
+        var source = sources.FirstOrDefault();
         return new ProjectInfo(project.Name, source, ctx.ProjectPath, Round(ctx.Playhead), ctx.SelectedClipId, ctx.IsPlaying,
             Round(project.OutputDuration), source is null ? [] : Clips(project), ctx.AnalysisStatus,
-            source is null ? null : StatusText(ctx.TranscriptStatus));
+            source is null ? null : StatusText(ctx.TranscriptStatus), sources, source is null ? null : Round(project.TimelineDuration));
     }
 
     private static AudioTrackInfo TrackInfo(int number, AudioTrack track, TrackMix mix) =>
         new(number, track.Label, mix.GainDb, mix.IsMuted);
 
+    /// <summary>The clips in output order, with their timeline ranges.</summary>
     private static List<ClipInfo> Clips(Project project) =>
-        [.. project.Clips.Select((c, i) => new ClipInfo(c.Id, i + 1, c.Label, Round(c.Start), Round(c.End), Round(c.Duration), c.IsIncluded,
-            RangeText(c.Start, c.End), ClipPalette.Key(c.Color)))];
+        [.. project.Clips.Select((c, i) => (Clip: c, Range: project.TimelineRange(c), Index: i)).Select(x => new ClipInfo(x.Clip.Id, x.Index + 1,
+            x.Clip.Label, Round(x.Range.Start), Round(x.Range.End), Round(x.Clip.Duration), x.Clip.IsIncluded, RangeText(x.Range.Start, x.Range.End),
+            ClipPalette.Key(x.Clip.Color), x.Clip.SourceId))];
 
     private static double Round(double seconds) => Math.Round(seconds, 3);
 
@@ -886,7 +906,10 @@ public sealed class EditorTools(IEditorHost host)
     }
 }
 
-/// <summary>Moves one or both ends of a clip; the other stays where it is when the edit is applied.</summary>
+/// <summary>
+/// Moves one or both ends of a clip to timeline times; the other stays where it is when the edit is applied. The times
+/// must be in the clip's video.
+/// </summary>
 internal sealed record PartialTrimCommand(int ClipId, double? Start, double? End) : IEditCommand
 {
     public string Name => "trim_segment";
@@ -900,8 +923,37 @@ internal sealed record PartialTrimCommand(int ClipId, double? Start, double? End
         if (Start is null && End is null)
             throw new EditException("Give a new start, a new end or both.");
         var clip = project.Get(ClipId);
-        return new SetClipRangeCommand(ClipId, Start ?? clip.Start, End ?? clip.End);
+        return new SetClipRangeCommand(ClipId, Start is { } start ? TimelineEdits.OnClipVideo(project, clip, start) : clip.Start,
+            End is { } end ? TimelineEdits.OnClipVideo(project, clip, end) : clip.End);
     }
+}
+
+/// <summary>Splits a clip at a timeline time, mapped onto its video when the edit is applied.</summary>
+internal sealed record SplitAtCommand(int ClipId, double Time) : IEditCommand
+{
+    public string Name => "split_segment";
+
+    public string Describe(Project before) => Resolve(before).Describe(before);
+
+    public Project Apply(Project project) => Resolve(project).Apply(project);
+
+    private SplitClipCommand Resolve(Project project) =>
+        new(ClipId, TimelineEdits.OnClipVideo(project, project.Get(ClipId), Time));
+}
+
+/// <summary>
+/// Keeps a timeline range: one clip, or one per video when it crosses a join (see <see cref="TimelineEdits.AddRange"/>),
+/// mapped onto the videos when the edit is applied.
+/// </summary>
+internal sealed record AddRangeCommand(double Start, double End, string? Label, int? Index, ClipColor? Color) : IEditCommand
+{
+    public string Name => "add_segment";
+
+    public string Describe(Project before) => Resolve(before).Describe(before);
+
+    public Project Apply(Project project) => Resolve(project).Apply(project);
+
+    private IEditCommand Resolve(Project project) => TimelineEdits.AddRange(project, Start, End, Label, Index, Color);
 }
 
 /// <summary>Joins a clip with the one after it, found when the edit is applied (after the operations before it).</summary>

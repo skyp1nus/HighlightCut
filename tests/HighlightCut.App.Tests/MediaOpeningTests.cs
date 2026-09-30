@@ -100,7 +100,7 @@ public sealed class MediaOpeningTests : IDisposable
         var editor = App.CreateEditor(null, opener);
         string video = NewFile("keynote_final_4k.mp4");
         string projectPath = Path.Combine(_dir, "keynote" + ProjectFile.Extension);
-        await ProjectFile.SaveAsync(DesignSample.Project with { Source = DesignSample.Source with { Path = video } }, projectPath,
+        await ProjectFile.SaveAsync(DesignSample.Project with { Sources = [DesignSample.Source with { Path = video }] }, projectPath,
             TestContext.Current.CancellationToken);
 
         await editor.OpenPath(projectPath);
@@ -117,7 +117,7 @@ public sealed class MediaOpeningTests : IDisposable
         var editor = App.CreateEditor(null, opener);
         string video = NewFile("keynote_final_4k.mp4");
         string projectPath = Path.Combine(_dir, "keynote" + ProjectFile.LegacyExtension);
-        await ProjectFile.SaveAsync(DesignSample.Project with { Source = DesignSample.Source with { Path = video } }, projectPath,
+        await ProjectFile.SaveAsync(DesignSample.Project with { Sources = [DesignSample.Source with { Path = video }] }, projectPath,
             TestContext.Current.CancellationToken);
         File.WriteAllText(projectPath, File.ReadAllText(projectPath).Replace(ProjectFile.FormatName, ProjectFile.LegacyFormatName, StringComparison.Ordinal));
 
@@ -132,11 +132,29 @@ public sealed class MediaOpeningTests : IDisposable
     }
 
     [AvaloniaFact]
+    public async Task A_project_with_several_videos_is_not_opened_yet()
+    {
+        var opener = new SampleOpener();
+        var editor = App.CreateEditor(null, opener);
+        var first = DesignSample.Source with { Path = NewFile("part1.mp4") };
+        var second = DesignSample.Source with { Path = NewFile("part2.mp4"), Id = 2 };
+        string projectPath = Path.Combine(_dir, "trip" + ProjectFile.Extension);
+        await ProjectFile.SaveAsync(DesignSample.Project.WithSources([first, second]), projectPath, TestContext.Current.CancellationToken);
+
+        await editor.OpenProjectFileAsync(projectPath);
+
+        Assert.False(editor.HasFile);
+        Assert.Empty(opener.Opened);
+        Assert.Contains("The project has 2 videos; this version of HighlightCut opens projects with one video.", editor.StatusMessage,
+            StringComparison.Ordinal);
+    }
+
+    [AvaloniaFact]
     public async Task A_project_whose_video_is_gone_is_not_opened()
     {
         var editor = App.CreateEditor(null, new SampleOpener());
         string projectPath = Path.Combine(_dir, "old" + ProjectFile.Extension);
-        await ProjectFile.SaveAsync(DesignSample.Project with { Source = DesignSample.Source with { Path = Path.Combine(_dir, "missing.mp4") } },
+        await ProjectFile.SaveAsync(DesignSample.Project with { Sources = [DesignSample.Source with { Path = Path.Combine(_dir, "missing.mp4") }] },
             projectPath, TestContext.Current.CancellationToken);
 
         await editor.OpenProjectFileAsync(projectPath);

@@ -218,9 +218,9 @@ public class HistoryIdTests
 
         Assert.True(s.Undo());
         Assert.True(s.Project.Get(3).IsIncluded);
-        Assert.Equal(-6, s.Project.MixOf(2).GainDb);
+        Assert.Equal(-6, s.Project.MixOf(1, 2).GainDb);
         Assert.True(s.Redo());
-        Assert.Equal(-6, s.Project.MixOf(2).GainDb);
+        Assert.Equal(-6, s.Project.MixOf(1, 2).GainDb);
     }
 
     [Fact]

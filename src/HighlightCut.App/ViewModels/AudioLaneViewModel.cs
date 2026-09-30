@@ -15,6 +15,9 @@ public sealed partial class AudioLaneViewModel(int stream, int index, string key
     public string Key { get; } = key;
     public string Label { get; } = label;
 
+    /// <summary>The video the stream belongs to (<see cref="SourceMedia.Id"/>), which the project's mix is keyed by too.</summary>
+    public int SourceId { get; init; } = SourceMedia.FirstId;
+
     /// <summary>Muted in the preview. Muted lanes are drawn at 30 % opacity.</summary>
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(MuteTip))]
@@ -41,7 +44,7 @@ public sealed partial class AudioLaneViewModel(int stream, int index, string key
     public System.Windows.Input.ICommand? EvenOutCommand { get; init; }
 
     /// <summary>The lane's settings as the project stores them.</summary>
-    public TrackMix Mix => new(Index, GainDb, IsMuted);
+    public TrackMix Mix => new(Index, GainDb, IsMuted, SourceId);
 
     [RelayCommand]
     private void ToggleMute() => IsMuted = !IsMuted;

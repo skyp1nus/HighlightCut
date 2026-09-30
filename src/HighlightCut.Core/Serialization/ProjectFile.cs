@@ -24,8 +24,9 @@ public sealed class ProjectFileException : Exception
 }
 
 /// <summary>
-/// Reads and writes <c>.highlightcut.json</c> project files. The source path is stored relative to the
-/// project file when possible, so a project folder can be moved together with its video. Projects saved before
+/// Reads and writes <c>.highlightcut.json</c> project files. Each video's path is stored relative to the
+/// project file when possible, so a project folder can be moved together with its videos. Version 1 files (one
+/// <c>"source"</c>) open as a project with one video; saving writes version 2 (<c>"sources"</c>). Projects saved before
 /// the app was renamed (<c>.ourcut.json</c>, format "ourcut-project") open the same way.
 /// </summary>
 public static class ProjectFile
@@ -41,8 +42,11 @@ public static class ProjectFile
     public static bool IsProjectPath(string path) =>
         path.EndsWith(Extension, StringComparison.OrdinalIgnoreCase) || path.EndsWith(LegacyExtension, StringComparison.OrdinalIgnoreCase);
 
-    /// <summary>Current schema version. Files with a higher version are rejected.</summary>
-    public const int CurrentVersion = 1;
+    /// <summary>
+    /// Current schema version. Files with a higher version are rejected. Version 2 has a list of videos
+    /// (<c>"sources"</c>, each with an id) and each clip names its video (<c>"source"</c>); version 1 had one video.
+    /// </summary>
+    public const int CurrentVersion = 2;
 
     public static string Serialize(Project project, string? projectPath = null)
     {
@@ -52,19 +56,20 @@ public static class ProjectFile
             Format = FormatName,
             Version = CurrentVersion,
             Name = project.Name,
-            Source = project.Source is { } s
-                ? new SourceDto
-                {
-                    Path = StorePath(s.Path, baseDir),
-                    Duration = s.Duration,
-                    FrameRate = s.FrameRate,
-                    AudioStreams = [.. s.AudioTracks.Select(a => AudioStream(a, project.MixOf(a.Index)))],
-                }
-                : null,
+            Sources = [.. project.Sources.Select(s => new SourceDto
+            {
+                Id = s.Id,
+                Path = StorePath(s.Path, baseDir),
+                Duration = s.Duration,
+                FrameRate = s.FrameRate,
+                AudioStreams = [.. s.AudioTracks.Select(a => AudioStream(a, project.MixOf(s.Id, a.Index)))],
+            })],
+            LastSourceId = project.NextSourceId - 1,
             LastClipId = project.NextClipId - 1,
             Clips = [.. project.Clips.Select(c => new ClipDto
             {
-                Id = c.Id, Label = c.Label, Start = c.Start, End = c.End, Included = c.IsIncluded, Color = ClipPalette.Key(c.Color),
+                Id = c.Id, Source = c.SourceId, Label = c.Label, Start = c.Start, End = c.End, Included = c.IsIncluded,
+                Color = ClipPalette.Key(c.Color),
             })],
         };
         return JsonSerializer.Serialize(dto, ProjectJsonContext.Default.ProjectDto);
@@ -92,15 +97,22 @@ public static class ProjectFile
             throw new ProjectFileException($"Unknown project format version {dto.Version}.");
 
         string? baseDir = projectPath is null ? null : Path.GetDirectoryName(Path.GetFullPath(projectPath));
-        SourceMedia? source = null;
-        if (dto.Source is { } s)
+        // Version 1 has one video, "source", which becomes video 1.
+        var sourceDtos = dto.Version >= 2 ? dto.Sources ?? []
+            : dto.Source is { } single ? [single.WithId(SourceMedia.FirstId)] : [];
+        var sources = new List<SourceMedia>();
+        foreach (var s in sourceDtos)
         {
             if (string.IsNullOrWhiteSpace(s.Path))
-                throw new ProjectFileException("The project's source file has no path.");
+                throw new ProjectFileException("A video of the project has no path.");
             if (!(s.Duration >= 0) || double.IsInfinity(s.Duration))
-                throw new ProjectFileException("The project's source duration is invalid.");
-            source = new SourceMedia(ResolvePath(s.Path, baseDir), s.Duration, s.FrameRate,
-                [.. (s.AudioStreams ?? []).Select(a => new AudioTrack(a.Index, a.Label ?? $"Audio {a.Index}"))]);
+                throw new ProjectFileException($"The duration of {Path.GetFileName(s.Path)} is invalid.");
+            if (s.Id is not { } id || id < 1)
+                throw new ProjectFileException($"{Path.GetFileName(s.Path)} has no valid id.");
+            if (sources.Exists(x => x.Id == id))
+                throw new ProjectFileException($"Video id {id} appears twice.");
+            sources.Add(new SourceMedia(ResolvePath(s.Path, baseDir), s.Duration, s.FrameRate,
+                [.. (s.AudioStreams ?? []).Select(a => new AudioTrack(a.Index, a.Label ?? $"Audio {a.Index}"))], id));
         }
 
         // Files saved before clip names were unique can have the same name twice: the first clip keeps it and the
@@ -115,18 +127,27 @@ public static class ProjectFile
                 throw new ProjectFileException($"Clip id {c.Id} appears twice.");
             if (!(c.End > c.Start) || c.Start < 0 || double.IsInfinity(c.End))
                 throw new ProjectFileException($"Clip {c.Id} has an invalid range ({c.Start}–{c.End}).");
+            // Version 1 clips are all in its one video; a version 2 clip may leave its video out while there is one.
+            int sourceId = dto.Version >= 2 && c.Source is { } id ? id
+                : sources.Count > 1 ? throw new ProjectFileException($"Clip {c.Id} does not say which video it is in.")
+                : sources.FirstOrDefault()?.Id ?? SourceMedia.FirstId;
+            if (sources.Count > 0 && !sources.Exists(s => s.Id == sourceId))
+                throw new ProjectFileException($"Clip {c.Id} is in video {sourceId}, which the project does not have.");
             string label = ClipNames.Unique(clips, string.IsNullOrWhiteSpace(c.Label) ? ClipNames.Default(c.Id) : c.Label);
             if (!ClipPalette.TryParse(c.Color, out var color))
                 uncoloured.Add(c.Id);
-            clips.Add(new Clip(c.Id, label, c.Start, c.End, c.Included, color));
+            clips.Add(new Clip(c.Id, label, c.Start, c.End, c.Included, color, sourceId));
         }
 
         // Files saved before tracks had a volume have none: every track plays at 0 dB, unmuted.
-        var project = new Project(string.IsNullOrWhiteSpace(dto.Name) ? "Untitled project" : dto.Name, source,
-            [.. ClipPalette.Fill(clips, uncoloured)]) { LastClipId = Math.Max(0, dto.LastClipId ?? 0) };
-        project = project.WithClips(project.Clips);
-        foreach (var a in dto.Source?.AudioStreams ?? [])
-            project = project.WithMix(new TrackMix(a.Index, TrackMix.ClampGain(a.GainDb ?? 0), a.Muted ?? false));
+        var project = new Project(string.IsNullOrWhiteSpace(dto.Name) ? "Untitled project" : dto.Name, [.. sources],
+            [.. ClipPalette.Fill(clips, uncoloured)]) { LastClipId = Math.Max(0, dto.LastClipId ?? 0), LastSourceId = Math.Max(0, dto.LastSourceId ?? 0) };
+        project = project.WithClips(project.Clips).WithSources(project.Sources);
+        foreach (var (s, id) in sourceDtos.Select((s, i) => (s, sources[i].Id)))
+        {
+            foreach (var a in s.AudioStreams ?? [])
+                project = project.WithMix(new TrackMix(a.Index, TrackMix.ClampGain(a.GainDb ?? 0), a.Muted ?? false, id));
+        }
         return project;
     }
 
@@ -197,7 +218,15 @@ internal sealed class ProjectDto
     public string? Format { get; set; }
     public int Version { get; set; }
     public string? Name { get; set; }
+
+    /// <summary>The one video of a version 1 file; version 2 writes <see cref="Sources"/>.</summary>
     public SourceDto? Source { get; set; }
+
+    /// <summary>The videos in timeline order (version 2).</summary>
+    public List<SourceDto>? Sources { get; set; }
+
+    /// <summary>The highest video id handed out (<see cref="Project.LastSourceId"/>); absent in version 1.</summary>
+    public int? LastSourceId { get; set; }
 
     /// <summary>The highest clip id handed out (<see cref="Project.LastClipId"/>); absent in older files.</summary>
     public int? LastClipId { get; set; }
@@ -207,10 +236,15 @@ internal sealed class ProjectDto
 
 internal sealed class SourceDto
 {
+    /// <summary>The video's <see cref="SourceMedia.Id"/>; absent in version 1, whose one video is video 1.</summary>
+    public int? Id { get; set; }
+
     public string? Path { get; set; }
     public double Duration { get; set; }
     public double FrameRate { get; set; }
     public List<AudioStreamDto>? AudioStreams { get; set; }
+
+    public SourceDto WithId(int id) => new() { Id = id, Path = Path, Duration = Duration, FrameRate = FrameRate, AudioStreams = AudioStreams };
 }
 
 internal sealed class AudioStreamDto
@@ -228,6 +262,10 @@ internal sealed class AudioStreamDto
 internal sealed class ClipDto
 {
     public int Id { get; set; }
+
+    /// <summary>The id of the clip's video (version 2).</summary>
+    public int? Source { get; set; }
+
     public string? Label { get; set; }
     public double Start { get; set; }
     public double End { get; set; }
