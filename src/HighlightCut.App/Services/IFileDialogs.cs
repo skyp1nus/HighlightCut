@@ -6,6 +6,9 @@ public interface IFileDialogs
     /// <summary>Returns the chosen video file, or null if cancelled.</summary>
     Task<string?> PickMediaToOpenAsync();
 
+    /// <summary>Returns the video files chosen to add to the project (several allowed), or none if cancelled.</summary>
+    Task<IReadOnlyList<string>> PickMediaToAddAsync() => Task.FromResult<IReadOnlyList<string>>([]);
+
     /// <summary>Returns the chosen <c>.highlightcut.json</c> file, or null if cancelled.</summary>
     Task<string?> PickProjectToOpenAsync();
 

@@ -17,12 +17,13 @@ public sealed partial class ClipViewModel : ViewModelBase
     private readonly Action<ClipViewModel, bool>? _setIncluded;
     private readonly Action<ClipViewModel, ClipColor>? _setColor;
 
-    public ClipViewModel(Clip clip, Action<ClipViewModel, bool>? setIncluded = null, Action<ClipViewModel, ClipColor>? setColor = null)
+    public ClipViewModel(Clip clip, Action<ClipViewModel, bool>? setIncluded = null, Action<ClipViewModel, ClipColor>? setColor = null,
+        Project? project = null)
     {
         Id = clip.Id;
         _setIncluded = setIncluded;
         _setColor = setColor;
-        Update(clip);
+        Update(clip, project);
     }
 
     public int Id { get; }
@@ -30,10 +31,26 @@ public sealed partial class ClipViewModel : ViewModelBase
     [ObservableProperty]
     public partial string Label { get; private set; } = "";
 
+    /// <summary>The video the clip is cut from (<see cref="SourceMedia.Id"/>).</summary>
+    [ObservableProperty]
+    public partial int SourceId { get; private set; }
+
+    /// <summary>The video's file name when the project has several videos; null with one.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasVideoName), nameof(VideoSuffix))]
+    public partial string? VideoName { get; private set; }
+
+    public bool HasVideoName => VideoName is not null;
+
+    /// <summary>"  ·  part-2.mp4" after the clip's name with several videos; empty with one.</summary>
+    public string VideoSuffix => VideoName is null ? "" : "  ·  " + VideoName;
+
+    /// <summary>In-point on the timeline (with several videos, the video's offset plus the clip's time in it).</summary>
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(StartText), nameof(Duration), nameof(DurationText), nameof(RangeText), nameof(ShortDurationText))]
     public partial double Start { get; private set; }
 
+    /// <summary>Out-point on the timeline.</summary>
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(EndText), nameof(Duration), nameof(DurationText), nameof(RangeText), nameof(ShortDurationText))]
     public partial double End { get; private set; }
@@ -111,12 +128,15 @@ public sealed partial class ClipViewModel : ViewModelBase
 
     public bool Contains(double t) => t >= Start && t <= End;
 
-    /// <summary>Copies the Core clip's data.</summary>
-    public void Update(Clip clip)
+    /// <summary>Copies the Core clip's data, its times placed on <paramref name="project"/>'s timeline.</summary>
+    public void Update(Clip clip, Project? project = null)
     {
+        var range = project?.FindSource(clip.SourceId) is not null ? project.TimelineRange(clip) : new TimeRange(clip.Start, clip.End);
         Label = clip.Label;
-        Start = clip.Start;
-        End = clip.End;
+        SourceId = clip.SourceId;
+        VideoName = project is { Sources.Count: > 1 } ? project.FindSource(clip.SourceId)?.FileName : null;
+        Start = range.Start;
+        End = range.End;
         IsIncluded = clip.IsIncluded;
         Color = clip.Color;
     }

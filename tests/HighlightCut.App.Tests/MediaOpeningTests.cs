@@ -132,7 +132,7 @@ public sealed class MediaOpeningTests : IDisposable
     }
 
     [AvaloniaFact]
-    public async Task A_project_with_several_videos_is_not_opened_yet()
+    public async Task A_project_with_several_videos_opens_every_one_end_to_end()
     {
         var opener = new SampleOpener();
         var editor = App.CreateEditor(null, opener);
@@ -143,10 +143,31 @@ public sealed class MediaOpeningTests : IDisposable
 
         await editor.OpenProjectFileAsync(projectPath);
 
+        Assert.True(editor.HasFile);
+        Assert.True(editor.HasSeveralVideos);
+        Assert.Equal([first.Path, second.Path], opener.Opened);
+        Assert.Equal([1, 2], editor.Session.Project.Sources.Select(s => s.Id));
+        Assert.Equal(2 * DesignSample.Source.Duration, editor.Duration, 6);
+        var timeline = Assert.IsType<TimelinePreview>(editor.Media);
+        Assert.Equal([0, DesignSample.Source.Duration], timeline.Parts.Select(p => p.Offset));
+        Assert.Equal(["part1.mp4", "part2.mp4"], editor.Videos.Select(v => v.Name));
+        Assert.Equal(DesignSample.Project.Clips.Count, editor.Clips.Count);
+    }
+
+    [AvaloniaFact]
+    public async Task A_project_whose_second_video_is_gone_is_not_opened()
+    {
+        var opener = new SampleOpener();
+        var editor = App.CreateEditor(null, opener);
+        var first = DesignSample.Source with { Path = NewFile("part1.mp4") };
+        var second = DesignSample.Source with { Path = Path.Combine(_dir, "missing.mp4"), Id = 2 };
+        string projectPath = Path.Combine(_dir, "trip" + ProjectFile.Extension);
+        await ProjectFile.SaveAsync(DesignSample.Project.WithSources([first, second]), projectPath, TestContext.Current.CancellationToken);
+
+        await editor.OpenProjectFileAsync(projectPath);
+
         Assert.False(editor.HasFile);
-        Assert.Empty(opener.Opened);
-        Assert.Contains("The project has 2 videos; this version of HighlightCut opens projects with one video.", editor.StatusMessage,
-            StringComparison.Ordinal);
+        Assert.Contains("missing.mp4 was not found", editor.StatusMessage, StringComparison.Ordinal);
     }
 
     [AvaloniaFact]

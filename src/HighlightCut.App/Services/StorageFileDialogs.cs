@@ -30,6 +30,17 @@ public sealed class StorageFileDialogs(TopLevel topLevel) : IFileDialogs
         return files.Count > 0 ? files[0].TryGetLocalPath() : null;
     }
 
+    public async Task<IReadOnlyList<string>> PickMediaToAddAsync()
+    {
+        var files = await topLevel.StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
+        {
+            Title = "Add video",
+            AllowMultiple = true,
+            FileTypeFilter = [Videos, FilePickerFileTypes.All],
+        }).ConfigureAwait(true);
+        return [.. files.Select(f => f.TryGetLocalPath()).OfType<string>()];
+    }
+
     public async Task<string?> PickProjectToOpenAsync()
     {
         var files = await topLevel.StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
