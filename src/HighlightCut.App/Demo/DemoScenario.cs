@@ -49,8 +49,8 @@ public static partial class DemoScenario
     }
 
     /// <summary>
-    /// The welcome tour's screens: its first step, Connect Claude before Claude has connected, or the Transcript step with
-    /// no model (offering the download, or downloading it at 64 %).
+    /// The welcome tour's screens: its first step, Connect Claude added to Claude Code before Claude has connected, or the
+    /// Transcript step with no model (offering the download, or downloading it at 64 %).
     /// </summary>
     private static void ApplyWelcome(EditorViewModel editor, DesignScreen screen)
     {
@@ -64,6 +64,8 @@ public static partial class DemoScenario
                 editor.Claude.IsConnected = false;
                 editor.Claude.IsListening = true;
                 editor.Tour.Step = 3;
+                // Demo mode runs nothing: the step only shows the result.
+                editor.Settings.AddToClaudeCodeCommand.Execute(null);
                 break;
             case DesignScreen.WelcomeTranscript or DesignScreen.WelcomeDownloading:
                 editor.Settings.LoadDesignNoModels();

@@ -373,6 +373,21 @@ bind to view models and never change the project themselves.
   "claude-code" Claude Code) names the client. The editor that holds the pipe lock writes its project (file name) to
   `<pipe>.owner` next to it; a waiting window reads it (`OtherOwnerLabel`) for "The HighlightCut window with … has the
   server".
+- **Adding HighlightCut to Claude** (the welcome tour's Connect Claude step and Settings → MCP server share
+  `SettingsViewModel`'s commands and result text). Claude Code: `ClaudeSetup.FindClaude` looks for the `claude` CLI on
+  the PATH (PATHEXT's .exe/.cmd on Windows) and where its installers put it; without it nothing runs and the step links
+  to the install page. Add to Claude Code runs `claude mcp remove --scope user ourcut` (after the rename),
+  `… remove … highlightcut` (failures ignored, so adding again replaces a stale path) and `claude mcp add` as hidden
+  processes with a 30 s timeout (a .cmd shim through `cmd /d /s /c`). Open terminal writes the same steps to
+  `%TEMP%\HighlightCut\add-to-claude-code-<guid>.cmd` (`chcp 65001`, ends with DONE or FAILED; a `.command`/`.sh`
+  elsewhere) and starts `wt.exe new-tab -d <folder> cmd.exe /k <name>`, else `cmd.exe /k <name>`: the script runs by its
+  bare name from its folder, so neither wt (which splits at `;`) nor cmd's quote rules see the path. Processes start
+  through `IProcessRunner`, which tests replace. Claude Desktop: `DesktopConfigFile.Add` merges the `highlightcut`
+  entry into claude_desktop_config.json (`%APPDATA%\Claude`, and the Microsoft Store app's
+  `%LOCALAPPDATA%\Packages\Claude_*\LocalCache\Roaming\Claude` when that folder exists): other keys and servers stay,
+  comments and trailing commas are read (and not written back), an `ourcut` entry that starts OurCut is removed, the
+  old file is kept as `.bak` and the new one replaces it in one move. A file it can't parse or write is left alone:
+  it opens and the entry is copied. In `--demo` runs nothing is run or written.
 - **Settings dialog**: `SettingsViewModel` is split by section (`SettingsViewModel.<Section>.cs`, views in
   `Views/Settings/<Section>Section.axaml`, shared styles in `Theme/Controls.axaml`). Every change goes through
   `UpdateSettings(change)`, which applies it to `Current` and saves. Segmented controls use `ChoiceSet<T>`.
@@ -408,8 +423,8 @@ bind to view models and never change the project themselves.
   (`AppDataFolder.MoveLegacy`): the whole folder when possible, else entry by entry, never overwriting what the new
   folder has. What cannot be moved (a file in use) is still read from the old folder (`AppDataFolder.PathFor`), a
   models folder chosen inside the old folder follows it (`Relocate`), and the log says what happened. The folder
-  keeps a `moved-from-OurCut.txt` note, and while it is there Settings → MCP server says to add HighlightCut to
-  Claude Code and Claude Desktop again (the old entries start `OurCut.exe` under the name `ourcut`).
+  keeps a `moved-from-OurCut.txt` note, and while it is there Settings → MCP server says that adding HighlightCut to
+  Claude Code and Claude Desktop again removes the old entries (they start `OurCut.exe` under the name `ourcut`).
   `Timeline` is the timeline toolbar's chips (Frames, Keyframes, Waveform, Silence, Scenes, Snap), saved as they are clicked and put
   back for every project and run (`SettingsViewModel.ApplyTimeline`); the design's screens show them all and save none.
   Playback is read before the player is created, which starts with the saved decoding and audio device. Changes apply

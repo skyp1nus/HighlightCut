@@ -28,7 +28,7 @@ public enum DesignScreen
     /// <summary>The welcome tour over the empty editor (HighlightCut Onboarding.dc.html, 1b), first step.</summary>
     Welcome,
 
-    /// <summary>The welcome tour's last step, Connect Claude, waiting for Claude.</summary>
+    /// <summary>The welcome tour's last step, Connect Claude, after Add to Claude Code and waiting for Claude.</summary>
     WelcomeClaude,
 
     /// <summary>The welcome tour's Transcript step with no model installed: it offers Parakeet's download.</summary>

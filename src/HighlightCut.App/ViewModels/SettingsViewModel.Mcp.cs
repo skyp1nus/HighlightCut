@@ -246,16 +246,149 @@ public sealed partial class SettingsViewModel
         timer.Start();
     }
 
+    // ---- Add to Claude ------------------------------------------------------------------------
+
+    /// <summary>Finds and runs the claude CLI and opens terminals; tests replace it so nothing is started.</summary>
+    internal ClaudeSetup Setup { get; set; } = ClaudeSetup.ForThisSystem();
+
+    /// <summary>The claude_desktop_config.json files to add HighlightCut to; tests replace it.</summary>
+    internal Func<IReadOnlyList<string>> ClaudeDesktopConfigFiles { get; set; } = () => DesktopConfigFile.Files(ClaudeDesktopConfigFile,
+        OperatingSystem.IsWindows() ? Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData) : null);
+
+    /// <summary>Opens a file or web page in its app; tests replace it.</summary>
+    internal Action<string> OpenFile { get; set; } = FileManager.Open;
+
+    /// <summary>What Add to Claude Code or Open terminal did; null before.</summary>
+    [ObservableProperty]
+    public partial string? ClaudeCodeResult { get; private set; }
+
+    /// <summary>The claude CLI was not found: the result says so, with a link to install it.</summary>
+    [ObservableProperty]
+    public partial bool IsClaudeCodeMissing { get; private set; }
+
+    /// <summary>What Add to Claude Desktop or Open file did; null before.</summary>
+    [ObservableProperty]
+    public partial string? ClaudeDesktopResult { get; private set; }
+
+    public const string AddedToClaudeCode = "Added to Claude Code. Start a new Claude Code chat.";
+
+    /// <summary>After the file is changed: Claude Desktop reads it only when it starts, and closing its window doesn’t quit it.</summary>
+    public static string RestartClaudeDesktop =>
+        OperatingSystem.IsWindows() ? "Quit Claude Desktop fully (right-click its tray icon → Quit) and start it again."
+        : OperatingSystem.IsMacOS() ? "Quit Claude Desktop fully (⌘Q) and start it again."
+        : "Quit Claude Desktop fully and start it again.";
+
+    /// <summary>Forgets what the buttons did (the welcome tour opens clean).</summary>
+    public void ClearClaudeResults()
+    {
+        ClaudeCodeResult = null;
+        ClaudeDesktopResult = null;
+        IsClaudeCodeMissing = false;
+    }
+
+    // After the rename the old "ourcut" server is removed too.
+    private IReadOnlyList<ClaudeCommand> ClaudeCodeSteps() => ClaudeSetup.Commands(McpCommand, McpArgs, removeOurCut: ShowRenameNote);
+
+    private string? FindClaude()
+    {
+        IsClaudeCodeMissing = false;
+        if (Setup.FindClaude() is { } claude)
+            return claude;
+        IsClaudeCodeMissing = true;
+        ClaudeCodeResult = "Claude Code isn’t installed, or it’s somewhere HighlightCut doesn’t look. Install it and try again, or copy the command.";
+        return null;
+    }
+
+    /// <summary>Runs claude mcp remove and add hidden, and shows how it went.</summary>
+    [RelayCommand]
+    private async Task AddToClaudeCode()
+    {
+        if (_editor.IsDemo)
+        {
+            ClaudeCodeResult = AddedToClaudeCode;
+            return;
+        }
+        if (FindClaude() is not { } claude)
+            return;
+        ClaudeCodeResult = "Adding to Claude Code…";
+        var result = await Setup.AddToClaudeCodeAsync(claude, ClaudeCodeSteps()).ConfigureAwait(true);
+        ClaudeCodeResult = result.Outcome switch
+        {
+            ClaudeCodeOutcome.Added => AddedToClaudeCode,
+            ClaudeCodeOutcome.TimedOut => "Claude Code didn’t answer in 30 seconds. Try Open terminal to see what it’s doing.",
+            ClaudeCodeOutcome.NotStarted => $"Couldn’t start Claude Code: {result.Message.TrimEnd('.')}. Try Open terminal.",
+            _ when result.Message.Length > 0 => $"Claude Code couldn’t add it: {result.Message}",
+            _ => "Claude Code couldn’t add it. Try Open terminal to see why.",
+        };
+    }
+
+    /// <summary>The same steps in a terminal window, to watch them or answer Claude Code.</summary>
+    [RelayCommand]
+    private async Task OpenClaudeCodeTerminal()
+    {
+        if (_editor.IsDemo)
+        {
+            ClaudeCodeResult = "Running in a new terminal. Start a new Claude Code chat when it says DONE.";
+            return;
+        }
+        if (FindClaude() is not { } claude)
+            return;
+        if (Setup.OpenTerminal(claude, ClaudeCodeSteps()))
+        {
+            ClaudeCodeResult = "Running in a new terminal. Start a new Claude Code chat when it says DONE.";
+        }
+        else
+        {
+            await CopyClaudeCodeCommand.ExecuteAsync(null).ConfigureAwait(true);
+            ClaudeCodeResult = "Couldn’t open a terminal. The command is copied: paste it into one.";
+        }
+    }
+
+    [RelayCommand]
+    private void InstallClaudeCode()
+    {
+        if (!_editor.IsDemo)
+            OpenFile(ClaudeSetup.InstallPage);
+    }
+
+    /// <summary>
+    /// Puts HighlightCut's entry into Claude Desktop's settings file (the Store app's too), keeping the rest. If a file
+    /// can’t be changed it stays as it was: it opens, and the entry is copied to add by hand.
+    /// </summary>
+    [RelayCommand]
+    private async Task AddToClaudeDesktop()
+    {
+        if (_editor.IsDemo)
+        {
+            ClaudeDesktopResult = "Added to Claude Desktop. " + RestartClaudeDesktop;
+            return;
+        }
+        var results = ClaudeDesktopConfigFiles().Select(f => DesktopConfigFile.Add(f, McpCommand, McpArgs)).ToList();
+        if (results.FirstOrDefault(r => r.Outcome == DesktopConfigOutcome.Failed) is { } failed)
+        {
+            await CopyClaudeDesktopCommand.ExecuteAsync(null).ConfigureAwait(true);
+            bool open = File.Exists(failed.File);
+            if (open)
+                OpenFile(failed.File);
+            ClaudeDesktopResult = $"Nothing was changed: {DesktopConfigFile.FileName} {failed.Error}. "
+                + (open ? "It’s open and the entry is copied: add it under mcpServers." : "The entry is copied: add it yourself.");
+            return;
+        }
+        string text = results.All(r => r.Outcome == DesktopConfigOutcome.AlreadyAdded) ? "HighlightCut is already in Claude Desktop."
+            : results.Any(r => r.RemovedOurCut) ? "Added to Claude Desktop, in place of the old OurCut entry."
+            : "Added to Claude Desktop.";
+        ClaudeDesktopResult = text + " " + RestartClaudeDesktop;
+    }
+
     [RelayCommand]
     private void OpenClaudeDesktopConfig()
     {
         if (_editor.IsDemo)
             return;
-        string file = ClaudeDesktopConfigFile;
-        if (File.Exists(file))
-            FileManager.Open(file);
+        if (ClaudeDesktopConfigFiles().FirstOrDefault(File.Exists) is { } file)
+            OpenFile(file);
         else
-            _editor.ShowMessage("Claude Desktop has no settings file yet. In Claude Desktop, open Settings → Developer → Edit Config to create it.");
+            ClaudeDesktopResult = $"There’s no {DesktopConfigFile.FileName} yet. Add to Claude Desktop makes it.";
     }
 
     // ---- Init, load, save --------------------------------------------------------------------
