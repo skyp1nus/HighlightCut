@@ -271,7 +271,10 @@ public sealed partial class TranscriptPanelViewModel : ViewModelBase
         for (int i = _words.Count; i < words.Count; i++)
             _words.Add(new TranscriptWordViewModel(i, words[i]));
         _wordList = words;
-        _paragraphs = TranscriptLayout.Paragraphs(words);
+        // With several videos, each video's words start a paragraph of their own, headed by the video's name.
+        var parts = _editor.PreviewParts;
+        _videoStarts = parts.Count > 1 ? [.. parts.Select((p, i) => (p.Offset, $"{i + 1} · {p.Name}"))] : [];
+        _paragraphs = TranscriptLayout.Paragraphs(words, _videoStarts.Count > 1 ? [.. _videoStarts.Skip(1).Select(v => v.Offset)] : null);
         SyncParagraphs();
         LaneChunks = TranscriptLayout.Chunks(words, _paragraphs);
         MarkFillers();
@@ -292,7 +295,7 @@ public sealed partial class TranscriptPanelViewModel : ViewModelBase
                     Paragraphs.RemoveAt(Paragraphs.Count - 1);
             }
             bool added = p == Paragraphs.Count;
-            var vm = added ? new TranscriptParagraphViewModel(this, paragraph.FirstWord, paragraph.Start) : Paragraphs[p];
+            var vm = added ? new TranscriptParagraphViewModel(this, paragraph.FirstWord, paragraph.Start) { Video = VideoStartingAt(p) } : Paragraphs[p];
             var words = vm.Words;
             while (words.Count > paragraph.WordCount)
                 words.RemoveAt(words.Count - 1);
@@ -303,6 +306,19 @@ public sealed partial class TranscriptPanelViewModel : ViewModelBase
         }
         while (Paragraphs.Count > _paragraphs.Count)
             Paragraphs.RemoveAt(Paragraphs.Count - 1);
+    }
+
+    /// <summary>Where each video starts and its name ("2 · part-2.mp4"), with several videos; empty with one.</summary>
+    private IReadOnlyList<(double Offset, string Name)> _videoStarts = [];
+
+    /// <summary>The name of the video paragraph <paramref name="p"/> is the first of, or null.</summary>
+    private string? VideoStartingAt(int p)
+    {
+        if (_videoStarts.Count == 0)
+            return null;
+        string? Of(double t) => _videoStarts.LastOrDefault(v => t >= v.Offset - 1e-9).Name ?? _videoStarts[0].Name;
+        string? own = Of(_paragraphs[p].Start);
+        return p == 0 || own != Of(_paragraphs[p - 1].Start) ? own : null;
     }
 
     /// <summary>The paragraph a word is in, or -1.</summary>
@@ -395,9 +411,12 @@ public sealed partial class TranscriptPanelViewModel : ViewModelBase
     /// </summary>
     private void UpdateOut(bool redraw = true)
     {
-        bool anyClips = _editor.Session.Project.Clips.Count > 0;
+        var project = _editor.Session.Project;
+        bool anyClips = project.Clips.Count > 0;
         var ranges = new List<(double Start, double End)>();
-        foreach (var clip in _editor.Session.Project.IncludedClips.OrderBy(c => c.Start))
+        // The words are on the timeline, and so are the clips' ranges.
+        foreach (var clip in project.IncludedClips.Select(c => project.FindSource(c.SourceId) is null ? new HighlightCut.Core.Model.TimeRange(c.Start, c.End) : project.TimelineRange(c))
+                     .OrderBy(c => c.Start))
         {
             if (ranges.Count > 0 && clip.Start <= ranges[^1].End)
                 ranges[^1] = (ranges[^1].Start, Math.Max(ranges[^1].End, clip.End));
@@ -672,6 +691,11 @@ public sealed partial class TranscriptParagraphViewModel(TranscriptPanelViewMode
 {
     public int FirstWord { get; } = firstWord;
     public double Start { get; } = start;
+
+    /// <summary>With several videos, the first paragraph of each has the video's name above it ("2 · part-2.mp4").</summary>
+    public string? Video { get; init; }
+
+    public bool HasVideo => Video is not null;
 
     /// <summary>"04:22".</summary>
     public string TimeText => TimeFormat.Clock(Start);

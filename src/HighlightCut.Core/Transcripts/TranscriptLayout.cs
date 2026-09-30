@@ -19,13 +19,18 @@ public static class TranscriptLayout
     /// Paragraphs: a new one starts after a pause of <see cref="ParagraphPause"/>, after a sentence followed by a pause of
     /// <see cref="Transcript.PhrasePause"/>, or after the sentence that makes a paragraph <see cref="LongParagraph"/> words long.
     /// </summary>
-    public static IReadOnlyList<Phrase> Paragraphs(IReadOnlyList<Word> words)
+    /// <param name="breaks">
+    /// Times that always start a paragraph (where each video after the first starts): the first word at or after one
+    /// begins a new paragraph, so no paragraph runs from one video into the next.
+    /// </param>
+    public static IReadOnlyList<Phrase> Paragraphs(IReadOnlyList<Word> words, IReadOnlyList<double>? breaks = null)
     {
         var paragraphs = new List<Phrase>();
         int first = 0;
         for (int i = 1; i <= words.Count; i++)
         {
-            if (i < words.Count && !StartsParagraph(words, first, i))
+            if (i < words.Count && !StartsParagraph(words, first, i)
+                && !(breaks?.Any(b => words[i - 1].Start < b && words[i].Start >= b) ?? false))
                 continue;
             paragraphs.Add(Span(words, first, i - first));
             first = i;
