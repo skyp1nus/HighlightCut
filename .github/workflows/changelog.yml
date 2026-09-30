@@ -1,8 +1,9 @@
 name: Changelog
 
-# A pull request that changes the app (src/) says so in CHANGELOG.md, under ## Unreleased. "[no changelog]" in the
-# title or the no-changelog label skips the check, for changes nobody would notice. Its own workflow, so editing the
-# title or the labels runs only this again, not the builds.
+# A pull request that changes the app (src/) says so in CHANGELOG.md, under ## Unreleased, and in Ukrainian in
+# CHANGELOG.uk.md. "[no changelog]" in the title or the no-changelog label skips that, for changes nobody would notice.
+# Every pull request also builds the release notes of the current version, which checks that the two files match. Its
+# own workflow, so editing the title or the labels runs only this again, not the builds.
 on:
   pull_request:
     types: [opened, synchronize, reopened, edited, labeled, unlabeled]
@@ -18,7 +19,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Check that CHANGELOG.md has the change
+      - name: Check that both changelogs have the change
         env:
           TITLE: ${{ github.event.pull_request.title }}
           SKIP_LABEL: ${{ contains(github.event.pull_request.labels.*.name, 'no-changelog') }}
@@ -30,12 +31,16 @@ jobs:
             exit 0
           fi
           changed=$(git diff --name-only "$(git merge-base "$BASE" "$HEAD")" "$HEAD")
-          if ! grep -q '^src/' <<< "$changed"; then
-            echo "Nothing under src/ changed."
-            exit 0
-          fi
-          if ! grep -qx 'CHANGELOG.md' <<< "$changed"; then
-            echo "::error::This pull request changes src/ but not CHANGELOG.md. Add a line under ## Unreleased (New, Improved or Fixed), or put [no changelog] in the title or add the no-changelog label if nobody would notice the change."
+          if grep -q '^src/' <<< "$changed" && ! grep -qx 'CHANGELOG.md' <<< "$changed"; then
+            echo "::error::This pull request changes src/ but not CHANGELOG.md. Add a line under ## Unreleased (New, Improved or Fixed), and the same in Ukrainian in CHANGELOG.uk.md, or put [no changelog] in the title or add the no-changelog label if nobody would notice the change."
             exit 1
           fi
-          echo "CHANGELOG.md is updated."
+          if grep -qx 'CHANGELOG.md' <<< "$changed" && ! grep -qx 'CHANGELOG.uk.md' <<< "$changed"; then
+            echo "::error::This pull request changes CHANGELOG.md but not CHANGELOG.uk.md. Add the same lines in Ukrainian there."
+            exit 1
+          fi
+          echo "The changelogs are updated, or nothing needs them."
+
+      # Not skipped by [no changelog]: a broken format or a Ukrainian mismatch fails here, not at the release.
+      - name: Build the release notes of this version
+        run: python3 scripts/release-notes.py

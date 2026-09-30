@@ -25,7 +25,7 @@
             <ItemsControl.ItemTemplate>
               <DataTemplate x:DataType="s:ChangelogRelease">
                 <StackPanel Spacing="14">
-                  <TextBlock Classes="mono" Text="{Binding Heading}" FontSize="10.5" Foreground="{StaticResource MutedBrush}" />
+                  <TextBlock Classes="mono" Text="{Binding Label}" FontSize="10.5" Foreground="{StaticResource MutedBrush}" />
                   <ItemsControl ItemsSource="{Binding Groups}">
                     <ItemsControl.ItemsPanel>
                       <ItemsPanelTemplate>
@@ -43,11 +43,14 @@
                               </ItemsPanelTemplate>
                             </ItemsControl.ItemsPanel>
                             <ItemsControl.ItemTemplate>
-                              <DataTemplate x:DataType="x:String">
+                              <DataTemplate x:DataType="s:ChangelogItem">
                                 <Grid ColumnDefinitions="16,*">
                                   <Ellipse Width="4" Height="4" Margin="0,8,0,0" HorizontalAlignment="Left" VerticalAlignment="Top"
                                            Fill="{StaticResource Muted3Brush}" />
-                                  <TextBlock Grid.Column="1" Classes="item" Text="{Binding}" />
+                                  <!-- The bold lead ("Clips snap together."), then the rest of the bullet. -->
+                                  <TextBlock Grid.Column="1" Classes="item">
+                                    <Run Text="{Binding Lead}" FontWeight="SemiBold" Foreground="{StaticResource TextBrush}" /><Run Text="{Binding Text}" />
+                                  </TextBlock>
                                 </Grid>
                               </DataTemplate>
                             </ItemsControl.ItemTemplate>

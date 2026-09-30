@@ -31,7 +31,10 @@ public sealed partial class WhatsNewViewModel(EditorViewModel editor) : ViewMode
     [ObservableProperty]
     public partial bool IsOpen { get; private set; }
 
-    public string Title => $"What’s new in HighlightCut {CurrentRelease.ToString(3)}";
+    /// <summary>"What’s new in HighlightCut 0.1.0 · First Cut", with this version's codename when it has one (no emoji).</summary>
+    public string Title => Changelog.Find(CurrentRelease)?.Name is { } name
+        ? $"What’s new in HighlightCut {CurrentRelease.ToString(3)} · {name}"
+        : $"What’s new in HighlightCut {CurrentRelease.ToString(3)}";
 
     /// <summary>The sections shown, newest first.</summary>
     [ObservableProperty]

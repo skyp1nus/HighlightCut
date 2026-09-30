@@ -1,8 +1,10 @@
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Controls.Documents;
 using Avalonia.Headless;
 using Avalonia.Headless.XUnit;
 using Avalonia.Input;
+using Avalonia.Media;
 using Avalonia.Media.Imaging;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
@@ -19,11 +21,11 @@ public sealed class WhatsNewTests : IDisposable
     private const string Notes = """
         ## Unreleased
 
-        ## 0.3.0 — 2026-12-01
+        ## 0.3.0 — 2026-12-01 — Chapters 📖
 
         ### New
 
-        - Chapters in the export.
+        - **Chapters.** In the export.
 
         ## 0.2.0 — 2026-11-01
 
@@ -100,8 +102,8 @@ public sealed class WhatsNewTests : IDisposable
         var whatsNew = editor.WhatsNew;
         Assert.True(whatsNew.IsOpen);
         Assert.False(editor.Tour.IsOpen);
-        Assert.Equal("What’s new in HighlightCut 0.3.0", whatsNew.Title);
-        Assert.Equal(["0.3.0 — 2026-12-01", "0.2.0 — 2026-11-01"], whatsNew.Releases.Select(r => r.Heading));
+        Assert.Equal("What’s new in HighlightCut 0.3.0 · Chapters", whatsNew.Title);
+        Assert.Equal(["0.3.0 — 2026-12-01 — Chapters", "0.2.0 — 2026-11-01"], whatsNew.Releases.Select(r => r.Label));
         Assert.True(Saved.WelcomeTourSeen);
         Assert.Equal("0.1.0", Saved.LastSeenVersion);
 
@@ -118,7 +120,7 @@ public sealed class WhatsNewTests : IDisposable
 
         Assert.Equal(StartDialog.WhatsNew, editor.WhatsNew.OpenAtStart(null, store.Existed));
 
-        Assert.Equal(["0.3.0 — 2026-12-01"], editor.WhatsNew.Releases.Select(r => r.Heading));
+        Assert.Equal([new Version(0, 3, 0)], editor.WhatsNew.Releases.Select(r => r.Version));
         Assert.False(editor.Tour.IsOpen);
         Assert.True(editor.Settings.WelcomeTourSeen);
     }
@@ -138,7 +140,7 @@ public sealed class WhatsNewTests : IDisposable
         var editor = Start(AppSettings.Default with { LastSeenVersion = "0.2.0", WelcomeTourSeen = true }, out var store);
 
         Assert.Equal(StartDialog.WhatsNew, editor.WhatsNew.OpenAtStart("talk.mp4", store.Existed));
-        Assert.Equal(["0.3.0 — 2026-12-01"], editor.WhatsNew.Releases.Select(r => r.Heading));
+        Assert.Equal([new Version(0, 3, 0)], editor.WhatsNew.Releases.Select(r => r.Version));
     }
 
     [AvaloniaTheory]
@@ -206,7 +208,7 @@ public sealed class WhatsNewTests : IDisposable
         editor.WhatsNew.ShowCommand.Execute(null);
 
         Assert.True(editor.WhatsNew.IsOpen);
-        Assert.Equal(["0.3.0 — 2026-12-01"], editor.WhatsNew.Releases.Select(r => r.Heading));
+        Assert.Equal([new Version(0, 3, 0)], editor.WhatsNew.Releases.Select(r => r.Version));
 
         // The app's own notes: this version's.
         var app = App.CreateEditor(null);
@@ -238,6 +240,45 @@ public sealed class WhatsNewTests : IDisposable
         using var frame = window.CaptureRenderedFrame();
         frame!.Save(Path.Combine(Screenshots.Directory, "whats-new-small-window.png"), new PngBitmapEncoderOptions());
         window.Close();
+    }
+
+    [AvaloniaFact]
+    public void The_bold_lead_of_each_bullet_is_bold_and_the_title_has_the_codename()
+    {
+        // The app's own notes, as the design screen shows them.
+        var editor = App.CreateEditor(DesignScreen.WhatsNew);
+        var window = new MainWindow { DataContext = editor, Width = 1280, Height = 860 };
+        window.Show();
+        Dispatcher.UIThread.RunJobs();
+        AvaloniaHeadlessPlatform.ForceRenderTimerTick();
+
+        var view = window.GetVisualDescendants().OfType<WhatsNewDialog>().Single();
+        var title = view.GetVisualDescendants().OfType<TextBlock>().Single(t => t.Name == "Title");
+        var release = Changelog.Embedded.Find(AppVersion.Release)!;
+        Assert.Equal($"What’s new in HighlightCut {AppVersion.Release.ToString(3)} · {release.Name}", title.Text);
+        Assert.DoesNotContain(view.GetVisualDescendants().OfType<TextBlock>(), t => t.Text?.Contains('\uFE0F') == true);
+
+        var items = view.GetVisualDescendants().OfType<TextBlock>().Where(t => t.Classes.Contains("item")).ToList();
+        Assert.Equal(release.Groups.Sum(g => g.Items.Count), items.Count);
+        foreach (var item in items)
+        {
+            var runs = item.Inlines!.OfType<Run>().ToList();
+            Assert.Equal(2, runs.Count);
+            Assert.Equal(FontWeight.SemiBold, runs[0].FontWeight);
+            Assert.False(string.IsNullOrEmpty(runs[0].Text));
+            Assert.DoesNotContain("**", runs[0].Text + runs[1].Text, StringComparison.Ordinal);
+        }
+
+        using var frame = window.CaptureRenderedFrame();
+        frame!.Save(Path.Combine(Screenshots.Directory, "whats-new.png"), new PngBitmapEncoderOptions());
+        window.Close();
+    }
+
+    [AvaloniaFact]
+    public void Without_a_codename_the_title_is_just_the_version()
+    {
+        var editor = Start(AppSettings.Default with { LastSeenVersion = "0.1.0" }, out _, "0.2.0");
+        Assert.Equal("What’s new in HighlightCut 0.2.0", editor.WhatsNew.Title);
     }
 
     [Fact]
