@@ -11,11 +11,13 @@ HighlightCut.Mcp    MCP tools, pipe server, bridge ───┘
 
 ## Core
 
-- **Model** (`HighlightCut.Core.Model`): immutable records. A `Project` has one `SourceMedia` (path, duration,
-  frame rate, audio tracks) and an ordered list of `Clip`s. List order is output order. Times are
-  seconds on the source timeline. Excluded clips (`IsIncluded = false`) stay in the project but are not exported.
+- **Model** (`HighlightCut.Core.Model`): immutable records. A `Project` has an ordered list of videos, `Sources`
+  (each a `SourceMedia`: id, path, duration, frame rate, audio tracks), end to end on one timeline, and an ordered list
+  of `Clip`s. List order is output order. A clip belongs to one video (`Clip.SourceId`) and its times are seconds on that
+  video; `Project.Source` is the first video, the only one in a project with one (see "Several videos in one project").
+  Excluded clips (`IsIncluded = false`) stay in the project but are not exported.
   `Project.AudioMix` holds a `TrackMix` (volume in dB, muted) for each audio track that is not at the default
-  (0 dB, unmuted), keyed by stream index. The volume runs from −40 dB, which means silent (−∞), to +12 dB.
+  (0 dB, unmuted), keyed by video and stream index. The volume runs from −40 dB, which means silent (−∞), to +12 dB.
 - **Clip names and colours**: every clip has a name of its own and a colour (see below).
 - **Commands** (`HighlightCut.Core.Editing`): every change is an `IEditCommand` that turns one `Project` into the
   next, or throws `EditException` with a readable reason. Commands never clamp or guess; callers do that.
@@ -32,44 +34,51 @@ The session is not thread-safe. The MCP server runs every tool call on the UI th
 
 | Command | `Name` | What it does |
 | --- | --- | --- |
-| `AddClipCommand` | `add_segment` | Adds a clip for a source range, at the end or at a position |
+| `AddClipCommand` | `add_segment` | Adds a clip for a range of one video, at the end or at a position |
 | `RemoveClipCommand` | `remove_segment` | Removes a clip from the project |
-| `SetClipRangeCommand` | `trim_segment` | Sets a clip's in- and out-point |
-| `SplitClipCommand` | `split_segment` | Splits a clip in two at a source time |
+| `SetClipRangeCommand` | `trim_segment` | Sets a clip's in- and out-point, inside its video |
+| `SplitClipCommand` | `split_segment` | Splits a clip in two at a time on its video |
 | `SetClipIncludedCommand` | `set_included` | Excludes a clip from the export or keeps it again |
 | `MoveClipCommand` | `move_segment` | Moves a clip to another output position |
 | `RenameClipCommand` | `set_label` | Renames a clip (refused if another clip has that name) |
-| `JoinClipsCommand` | `join_segments` | Joins a clip with the next one on the source timeline into one clip |
+| `JoinClipsCommand` | `join_segments` | Joins a clip with the next one in its video into one clip (never across videos) |
 | `SetClipColorCommand` | `set_color` | Sets a clip's colour |
 | `BatchCommand` | any | Several commands as one undo step |
 | `RevertEditCommand` | `revert_action` | Reverts one earlier edit and keeps the edits made after it |
-| `CutRangesCommand` | `cut_silences`, `cut_ranges`, `cut_filler_words` | Cuts source ranges out of the clips they touch, splitting them |
+| `CutRangesCommand` | `cut_silences`, `cut_ranges`, `cut_filler_words` | Cuts ranges of the videos out of the clips they touch, splitting them |
+| `AddSourceCommand` | `add_video` (no tool yet) | Adds a video at the end of the timeline, with the next free id |
+| `RemoveSourceCommand` | `remove_video` (no tool yet) | Removes a video and every clip cut from it; refused for the only video |
+| `MoveSourceCommand` | `move_video` (no tool yet) | Moves a video to another place on the timeline; its clips move with it |
 
-`EditorSession` wraps these with UI-friendly helpers (`Trim` clamps and snaps, `KeepRange` inserts by source
-position, `Split` returns the new clip, `JoinWithNext` finds the clip to join).
+Commands take seconds on one video. `EditorSession` wraps them with UI-friendly helpers that take timeline seconds,
+the times the user sees (`Trim` clamps and snaps, `KeepRange` inserts by timeline position, `AddClip` and `KeepRange`
+make one clip per video when the range crosses a join, `Split` returns the new clip, `JoinWithNext` finds the clip to
+join, `AddSource`, `RemoveSource` and `MoveSource` edit the videos). `TimelineEdits` does the mapping for them and for
+the MCP tools.
 
 ### Clips never share source time
 
-Two clips over the same seconds would put them in the export twice, so no edit may make clips overlap, whether they
-are included or not (an excluded clip can be kept again at any time). Touching is fine: one clip's out-point may equal
-the next one's in-point (`Project.OverlapTolerance`, a microsecond, absorbs rounding in times from elsewhere).
+Two clips over the same seconds of a video would put them in the export twice, so no edit may make clips overlap,
+whether they are included or not (an excluded clip can be kept again at any time). The rule is per video: clips of
+different videos never share time, even at the same seconds of their own files. Touching is fine: one clip's out-point
+may equal the next one's in-point (`Project.OverlapTolerance`, a microsecond, absorbs rounding in times from elsewhere).
 
 - **Commands refuse.** `AddClipCommand` refuses a range another clip covers; `SetClipRangeCommand` checks only the
   time a clip gains, so it may always shrink. The message names the clip in the way and both ranges. Split and
   `CutRangesCommand` only ever cut inside a clip. As a backstop for everything else (`BatchCommand`, `RevertEditCommand`
   when a later edit took the time back, commands to come), `EditorSession.Execute` refuses any edit after which more
   source time is covered twice than before (`EditRules.ValidateNoNewOverlap`).
-- **Session helpers clamp.** `Trim` stops an end at the neighbour's edge (`Project.TrimLimit`) and, within the snap
-  distance, snaps onto it: the magnet. The neighbour's edge wins over a keyframe; keyframes are only snapped to with
+- **Session helpers clamp.** `Trim` stops an end at the neighbour's edge in its video or the video's start or end
+  (`Project.TrimLimit`) and, within the snap distance, snaps onto it: the magnet. The neighbour's edge wins over a keyframe; keyframes are only snapped to with
   the Snap chip on, the magnet always. `KeepRange` ("+ Keep", "Keep as clip") takes the free part of the range
   (`Project.FreeRange`: from where a covering clip ends to where the next begins) and refuses when nothing is left
   ("That is already in clip 3."). I and O trim like the handles; I with nothing selected starts a clip of up to 10 s
-  that stops at the next clip, and says which clip to select when the playhead is inside one.
+  that stops at the next clip (or the end of its video), and says which clip to select when the playhead is inside one.
 - **Joining.** `JoinClipsCommand(first, second)` gives the first clip the second's out-point and removes the second, in
   one undo step. The joined clip keeps the first clip's id, name and inclusion, at the earlier of the two output
   positions. The two must be next to each other in the output and touch, or be less than `EditRules.JoinGap` (0.5 s)
   apart: a few frames missed while trimming, which the join then keeps. A longer gap is a cut someone meant, so it is
-  refused with the distance. Overlapping clips of an old project can always be joined, which is how to tidy them up.
+  refused with the distance. Clips of different videos are never joined ("Clips 3 and 4 are in different videos…"). Overlapping clips of an old project can always be joined, which is how to tidy them up.
 - **Old projects.** Files saved before this rule may have overlapping clips; they open as they are (with a status
   message naming a pair), and edits may shrink those overlaps but not grow them. The export never plays a second
   twice: `Project.OutputParts()` is what is exported, each included clip in output order less the seconds an earlier
@@ -77,10 +86,65 @@ the next one's in-point (`Project.OverlapTolerance`, a microsecond, absorbs roun
   the export plan both use it.
 
 `Revert(entry)` is the Undo on a single card in the Claude panel. Unlike `Undo`, which steps back through the
-history, it applies a `RevertEditCommand`: the clips that edit added, removed, changed or reordered go back to how
-they were before it, and every other clip stays as it is now. The revert is an ordinary edit, so Ctrl+Z undoes it
+history, it applies a `RevertEditCommand`: the clips and videos that edit added, removed, changed or reordered go back
+to how they were before it, and every other clip and video stays as it is now. A video the edit added cannot go again
+once clips were cut from it since. The revert is an ordinary edit, so Ctrl+Z undoes it
 and it can be reverted in turn (`RevertOf`, `IsReverted`). If a later edit changed one of the same clips there is no
 single right answer, so the command refuses with an `EditException` and the UI shows the reason.
+
+## Several videos in one project
+
+A project can hold several videos, end to end on one timeline: part 1, then part 2, and so on. The export joins the
+included clips of all of them, in the clip list's order, into one file. A project with one video, which is every
+project the app makes today and every file saved before, works exactly as before.
+
+- **The model.** `Project.Sources` is the videos in timeline order, each `SourceMedia` with a stable `Id` (the first
+  is `SourceMedia.FirstId`, 1; `Project.LastSourceId` only goes up, like `LastClipId`, so a removed video's id is never
+  handed out again). A clip names its video (`Clip.SourceId`) and keeps its times in seconds on that video, so moving a
+  video moves its clips along and nothing else changes. The output order stays the clip list's; moving videos never
+  reorders it. `Project.Source` is the first video, and the constructor that takes one `SourceMedia` makes a
+  one-video project, which keeps one-video code as it was.
+- **The timeline** (`Project`): `OffsetOf(video)` is the length of the videos before it, `TimelineDuration` all of
+  them; `ToSource(time)` gives the video at a timeline time and the time on it (a join belongs to the video that
+  starts there, the end of the timeline to the last video), `ToTimeline(video, time)` the way back;
+  `TimelineRange(clip)`, `SpanOf(video)`, `SourceAt(time)` and `SplitAtSources(start, end)`, which cuts a timeline
+  range at the joins into a `SourceRange` per video, leaving out parts of no length. A project without videos (the
+  empty project) has an open-ended timeline at 0.
+- **The rules, per video.** A clip never crosses a join. `Overlaps`, `OutputParts`, `FirstOverlapping`, `FreeRange`,
+  `TrimLimit` and the magnet look only at the clips of one video. Join refuses clips of different videos. Split and
+  trim stay in the clip's video: a time outside it is refused, naming the video's place on the timeline.
+  `EditorSession.Execute` refuses any edit that leaves a clip without its video (`EditRules.ValidateClipSources`).
+- **Timeline seconds in, video seconds out.** Commands take seconds on one video (`AddClipCommand.SourceId`, which may
+  be left out while the project has one video; `CutRangesCommand` takes `SourceRange`s). The session helpers and
+  Claude's tools take timeline seconds and map them with `TimelineEdits`: a range over a join (Keep, I, Claude's
+  `add_segment`) becomes one clip per video, next to each other in the output, in one undo step; a part shorter than a
+  clip can be on one side of the join is left out. `KeepRange` takes the free part on the timeline, so from inside a
+  clip that ends a video it goes on in the next one.
+- **Videos are edits.** `AddSourceCommand` appends a video, `RemoveSourceCommand` removes it with its clips (the only
+  video cannot be removed) and `MoveSourceCommand` reorders; each is one undo step, and `RevertEditCommand` and
+  `BatchCommand` handle them like clip edits. Removing a video keeps its `AudioMix` entries, so undo brings it back with
+  its mix; the file keeps only the tracks of the videos it has.
+- **Audio** is per video: `TrackMix.SourceId` and `Project.MixOf(video, stream)`, since each file has its own tracks.
+- **Keyframes** for snapping (`EditorSession.Keyframes`) are timeline times: each video's keyframes moved by its offset.
+
+### What part 1 does, and what comes next
+
+Part 1 is the model above, the project file (version 2) and Claude's tools in timeline seconds. The app opens, edits and
+saves one-video projects as before; a project file with several videos is refused on open ("The project has 2 videos;
+this version of HighlightCut opens projects with one video."), and `ExportPlanner` refuses one, so nothing plays or
+exports the wrong file. On top of the model:
+
+- **The app (part 2)**: adding (appends, `EditorSession.AddSource`), removing and reordering videos, with undo; the
+  timeline drawn over `TimelineDuration` with each clip at `TimelineRange` and a mark at each join; the player
+  following the playhead across videos (`ToSource` picks the file and the time; loading the next file at a join); the
+  analyses per video (waveform, keyframes, thumbnails, scenes, silences, transcript, each read and cached per file as
+  today) drawn and searched at their offsets, keyframes handed to the session on the timeline; audio lanes per video
+  (`MixOf(video, stream)`); the transcript and "Cut out" mapping words to their video. Then the open refusal goes.
+- **Export and Claude (part 3)**: `ExportPlanner` cutting each `OutputPart` from its clip's own file (`plan.Source`
+  per video, keyframes per video, `JoinTouching` only within one video), and joining videos with different codecs or
+  sizes (re-encode, or refuse lossless with a reason); audio mapping per video. Claude's tools for adding, removing and
+  moving videos (`add_video`, `remove_video`, `move_video`, the command names) and the analyses per video, with times
+  on the timeline.
 
 ## Media
 
@@ -305,7 +369,7 @@ Claude ──stdio──> HighlightCut.exe mcp (McpBridge) ──named pipe─�
 
 | Tool | Does |
 | --- | --- |
-| `get_project` | Source (with each audio track's volume and mute), playhead, selection and clips in output order |
+| `get_project` | The videos (`sources`: id, file name, duration, timeline offset, audio tracks with volume and mute; `source` is the first), the timeline's length, playhead, selection and clips in output order with their timeline range and video |
 | `get_history` | Recent edits (user's and Claude's) with ids for `revert_action` |
 | `find_keyframes` | Keyframe times in a range (lossless cuts start on them); scans the video first if needed |
 | `find_silences` | Pauses at a minimum length and level (automatic by default), on all or some audio tracks; reads the audio first if needed |
@@ -315,7 +379,7 @@ Claude ──stdio──> HighlightCut.exe mcp (McpBridge) ──named pipe─�
 | `search_transcript`, `find_filler_words` | Where a word or phrase (case and punctuation ignored), or the user's filler words (Settings → Transcription), are said |
 | `cut_ranges`, `cut_filler_words` | Cut any source ranges (e.g. from the transcript), or the filler words, out of the clips as one undo step |
 | `list_videos` | Video files in a folder, newest first |
-| `add_segment`, `remove_segment`, `trim_segment`, `split_segment`, `join_segments`, `set_included`, `move_segment`, `set_label`, `set_color` | One edit each (the commands above); a range or trim over another clip is refused; `add_segment` takes an optional label and colour |
+| `add_segment`, `remove_segment`, `trim_segment`, `split_segment`, `join_segments`, `set_included`, `move_segment`, `set_label`, `set_color` | One edit each (the commands above); a range or trim over another clip is refused; `add_segment` takes an optional label and colour, and a range over a join becomes one clip per video |
 | `edit_timeline` | Several edits as one undo step, all or nothing (actions add, remove, trim, split, join, include, exclude, move, rename, color) |
 | `revert_action`, `undo`, `redo` | Take edits back |
 | `seek`, `set_playing` | Show a frame or play |
@@ -323,7 +387,11 @@ Claude ──stdio──> HighlightCut.exe mcp (McpBridge) ──named pipe─�
 | `export`, `get_export_status`, `cancel_export` | Export like the Export button (runs in the background; the Claude panel shows it); choices left out keep the dialog's; waits up to 20 s, then Claude polls |
 
 A refused edit (`EditException`, e.g. "Clip 7 does not exist") goes back to Claude as a tool error it can act on.
-Results are JSON; times are seconds, rounded to milliseconds, with `MM:SS.mmm` ranges for talking to the user.
+Results are JSON; times are seconds on the timeline (every video end to end, the numbers the user sees; with one video,
+seconds on it), rounded to milliseconds, with `MM:SS.mmm` ranges for talking to the user. Tools that take times map
+them onto the videos as the session does (`TimelineEdits`; `PartialTrimCommand`, `SplitAtCommand` and `AddRangeCommand`
+map when the edit is applied, so they work inside `edit_timeline`). The analyses (keyframes, silences, scenes, the
+transcript) are the open file's, the first video's, which starts the timeline at 0.
 
 ## App
 
@@ -575,29 +643,41 @@ Claude's `get_project` and every edit result list each clip's `color` by name.
 ```json
 {
   "format": "highlightcut-project",
-  "version": 1,
+  "version": 2,
   "name": "launch-keynote",
-  "source": {
-    "path": "media/keynote_final_4k.mp4",
-    "duration": 872.48,
-    "frameRate": 29.97,
-    "audioStreams": [ { "index": 1, "label": "Mic" }, { "index": 2, "label": "Game", "gainDb": -6, "muted": true } ]
-  },
+  "sources": [
+    {
+      "id": 1,
+      "path": "media/keynote_final_4k.mp4",
+      "duration": 872.48,
+      "frameRate": 29.97,
+      "audioStreams": [ { "index": 1, "label": "Mic" }, { "index": 2, "label": "Game", "gainDb": -6, "muted": true } ]
+    },
+    { "id": 2, "path": "media/keynote_qa.mp4", "duration": 1200, "frameRate": 29.97, "audioStreams": [ { "index": 1, "label": "Mic" } ] }
+  ],
+  "lastSourceId": 2,
   "lastClipId": 7,
   "clips": [
-    { "id": 1, "label": "Intro", "start": 12.04, "end": 45.32, "included": true, "color": "teal" }
+    { "id": 1, "source": 1, "label": "Intro", "start": 12.04, "end": 45.32, "included": true, "color": "teal" },
+    { "id": 7, "source": 2, "label": "Best question", "start": 310.5, "end": 352, "included": true, "color": "amber" }
   ]
 }
 ```
 
-- `path` is relative to the project file when the video is on the same drive, otherwise absolute.
+- `sources` are the videos in timeline order. `id` is the video's stable id, which clips name in `source`; clip times
+  are seconds on that video. A clip may leave `source` out while the project has one video.
+- Each `path` is relative to the project file when the video is on the same drive, otherwise absolute.
 - Times are seconds with an invariant decimal point.
 - `gainDb` (a track's volume) and `muted` are left out at their defaults (0 dB, not muted), so files from before
-  they existed load with every track at 0 dB. Out-of-range volumes are clamped to −40…+12 dB.
+  they existed load with every track at 0 dB. Out-of-range volumes are clamped to −40…+12 dB. They belong to the
+  video they are listed under.
 - `lastClipId` is the highest clip id handed out, deleted clips included; without it (older files) the highest id in
-  the file is used. `color` is a palette name; clips without one get one on load. Names that appear twice get
-  " · 2" added on load (see "Clip names and colours").
-- Readers ignore unknown fields. Files with a higher `version` than the app supports are rejected.
+  the file is used. `lastSourceId` is the same for videos. `color` is a palette name; clips without one get one on load.
+  Names that appear twice get " · 2" added on load (see "Clip names and colours").
+- Version 1 files have one video, `"source": { "path": …, "duration": …, "frameRate": …, "audioStreams": [ … ] }`
+  without an id, and clips without `source`: they open as a project whose one video is video 1. Saving writes version 2.
+- Readers ignore unknown fields. Files with a higher `version` than the app supports are rejected, and so are videos
+  without a path or a valid id, ids that appear twice, and clips in a video the file does not have.
 - Projects from before the app was renamed (OurCut) are `.ourcut.json` files with `"format": "ourcut-project"`. They
   open everywhere a project does (dialogs, drag and drop, recent files, Claude's `open_file`), and saving one writes
   back to the same file; only Save as picks a `.highlightcut.json` name.
