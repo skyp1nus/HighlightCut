@@ -6,8 +6,8 @@ HighlightCut is licensed under GPL-3.0-or-later. It depends on the components be
 
 | Component | Version | License | Source |
 | --- | --- | --- | --- |
-| FFmpeg (`ffmpeg.exe`, `ffprobe.exe`) | n9.0.1-11-ge47273f4d9, [BtbN/FFmpeg-Builds](https://github.com/BtbN/FFmpeg-Builds) `autobuild-2026-08-31-13-27`, win64-gpl | GPL-3.0-or-later | [FFmpeg e47273f4d9](https://github.com/FFmpeg/FFmpeg/commit/e47273f4d9) |
-| libmpv (`libmpv-2.dll`) | v0.41.0-1050-ge76a35ec9, [shinchiro/mpv-winbuild-cmake](https://github.com/shinchiro/mpv-winbuild-cmake) `20260920` | GPL (built with GPL FFmpeg) | [mpv e76a35ec95](https://github.com/mpv-player/mpv/commit/e76a35ec95) |
+| FFmpeg (`ffmpeg.exe`, `ffprobe.exe`) | n9.0.2-17-g2a571b6068, [BtbN/FFmpeg-Builds](https://github.com/BtbN/FFmpeg-Builds) `autobuild-2026-09-30-13-08`, win64-gpl | GPL-3.0-or-later | [FFmpeg 2a571b6068](https://github.com/FFmpeg/FFmpeg/commit/2a571b6068) |
+| libmpv (`libmpv-2.dll`) | v0.41.0-1087-ge470f8986, [shinchiro/mpv-winbuild-cmake](https://github.com/shinchiro/mpv-winbuild-cmake) `20260928` | GPL (built with GPL FFmpeg) | [mpv e470f8986e](https://github.com/mpv-player/mpv/commit/e470f8986e) |
 | Vulkan loader (`vulkan-fallback/vulkan-1.dll`) | 1.3.283, from `Silk.NET.Vulkan.Loader.Native` 2025.9.12 | Apache-2.0 | [KhronosGroup/Vulkan-Loader](https://github.com/KhronosGroup/Vulkan-Loader) |
 | sherpa-onnx with DirectML (`sherpa-onnx-c-api.dll`) | v1.13.8, built by `.github/workflows/sherpa-directml.yml` | Apache-2.0 | [k2-fsa/sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) |
 | ONNX Runtime DirectML (`onnxruntime.dll`) | 1.24.4, from `Microsoft.ML.OnnxRuntime.DirectML` | MIT | [microsoft/onnxruntime](https://github.com/microsoft/onnxruntime) |

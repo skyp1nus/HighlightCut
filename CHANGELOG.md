@@ -9,6 +9,10 @@ starts with a short bold phrase. The same line goes into [CHANGELOG.uk.md](CHANG
 
 ## Unreleased
 
+### Improved
+
+- **Up-to-date video engine.** ffmpeg, which cuts and exports, moves to 9.0.2, and mpv, which plays the video, to its latest build, with their newest fixes.
+
 ## 0.1.0 — 2026-09-30 — First Cut ✂️
 
 ### New
