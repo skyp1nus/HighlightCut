@@ -102,6 +102,60 @@ public sealed class MpvPlayerTests(SampleMediaFixture media) : IClassFixture<Sam
     }
 
     [Fact]
+    public async Task Several_files_play_as_one_timeline_with_seeks_across_the_join()
+    {
+        media.SkipIfUnavailable();
+        string timeline = MpvTimeline.PathFor([new TimelineFile(media.Mp4, 10, 2), new TimelineFile(media.Mkv, 10, 2)]);
+        var player = await LoadAsync(timeline);
+        Assert.Equal(20, player.Duration, 1);
+
+        player.Seek(14.5);
+        await WaitUntil(() => !player.IsSeeking);
+        Assert.Equal(14.5, player.Position, 3);
+
+        // Across the join: the position keeps going, with no long stall where the second file takes over.
+        player.Seek(9.6);
+        await WaitUntil(() => !player.IsSeeking);
+        var stalls = new List<double>();
+        var last = (Time: DateTime.UtcNow, Position: player.Position);
+        player.StateChanged += (_, _) =>
+        {
+            var now = (Time: DateTime.UtcNow, Position: player.Position);
+            if (now.Position > last.Position)
+            {
+                stalls.Add((now.Time - last.Time).TotalSeconds - (now.Position - last.Position));
+                last = now;
+            }
+        };
+        player.Play();
+        await WaitUntil(() => player.Position > 10.6);
+        player.Pause();
+        Assert.Null(player.LastError);
+        TestContext.Current.TestOutputHelper?.WriteLine($"Longest stall at the join: {stalls.Max():0.000} s");
+        Assert.True(stalls.Max() < 0.5, $"The longest stall was {stalls.Max():0.000} s.");
+    }
+
+    [Fact]
+    public async Task The_file_with_the_most_audio_tracks_sets_the_timeline_tracks()
+    {
+        media.SkipIfUnavailable();
+        string oneTrack = Path.Combine(media.NewOutputFolder(), "one track.mp4");
+        await HighlightCut.Media.Tools.ToolProcess.RunAsync("ffmpeg",
+            ["-v", "error", "-i", media.Mp4, "-map", "0:v", "-map", "0:a:0", "-c", "copy", "-y", oneTrack], null, Ct);
+        var player = await LoadAsync(MpvTimeline.PathFor([new TimelineFile(oneTrack, 10, 1), new TimelineFile(media.Mp4, 10, 2)]));
+
+        Assert.Equal("3", player.GetPropertyString("track-list/count"));
+        // Track 2 is missing in the first file: playing both tracks there plays what it has.
+        player.SetAudioTracks([true, true], [0, -6]);
+        player.Seek(9.5);
+        await WaitUntil(() => !player.IsSeeking);
+        player.Play();
+        await WaitUntil(() => player.Position > 10.3);
+        player.Pause();
+        Assert.Null(player.LastError);
+    }
+
+    [Fact]
     public async Task Frame_steps_move_one_frame()
     {
         var player = await LoadAsync();

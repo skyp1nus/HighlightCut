@@ -74,14 +74,17 @@ public sealed class MediaCache
     /// Frees the cache: every video's analysis goes, except <paramref name="keepMediaPath"/>'s (the open video uses it),
     /// and transcripts stay (they take long to redo). A folder left empty goes too; files in use are skipped.
     /// </summary>
-    public void Clear(string? keepMediaPath = null)
+    public void Clear(string? keepMediaPath = null) => Clear(keepMediaPath is null ? [] : [keepMediaPath]);
+
+    /// <summary>As <see cref="Clear(string?)"/>, keeping the folders of several videos (every video of the open project).</summary>
+    public void Clear(IReadOnlyCollection<string> keepMediaPaths)
     {
         if (!Directory.Exists(Root))
             return;
-        string? keep = keepMediaPath is null ? null : KeyFor(keepMediaPath);
+        var keep = keepMediaPaths.Select(KeyFor).ToHashSet(StringComparer.Ordinal);
         foreach (string dir in SafeEnumerate(() => Directory.EnumerateDirectories(Root)))
         {
-            if (Path.GetFileName(dir) == keep)
+            if (keep.Contains(Path.GetFileName(dir)))
                 continue;
             foreach (string entry in SafeEnumerate(() => Directory.EnumerateFileSystemEntries(dir)))
             {

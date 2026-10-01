@@ -6,7 +6,7 @@
              x:Class="HighlightCut.App.Views.ClipsPanel"
              x:DataType="vm:EditorViewModel">
   <!-- Data-table rows: grip, #, colour swatch, label and in – out, duration, include switch, remove. -->
-  <Grid RowDefinitions="40,24,*,40">
+  <Grid RowDefinitions="40,Auto,24,*,40">
     <!-- Tabs: Clips (with the count) and Transcript, and a hint on the right. -->
     <Border BorderBrush="{StaticResource DividerBrush}" BorderThickness="0,0,0,1" Padding="10,0,12,0">
       <Grid ColumnDefinitions="Auto,*,Auto">
@@ -27,7 +27,12 @@
       </Grid>
     </Border>
 
-    <Border Grid.Row="1" BorderBrush="{StaticResource DividerSoftBrush}" BorderThickness="0,0,0,1" Padding="12,0" IsVisible="{Binding IsClipsTab}">
+    <!-- With several videos: the Videos list above the clips. -->
+    <Panel Grid.Row="1" IsVisible="{Binding IsClipsTab}">
+      <v:VideosPanel IsVisible="{Binding HasSeveralVideos}" />
+    </Panel>
+
+    <Border Grid.Row="2" BorderBrush="{StaticResource DividerSoftBrush}" BorderThickness="0,0,0,1" Padding="12,0" IsVisible="{Binding IsClipsTab}">
       <Grid Classes="cols" ColumnDefinitions="10,8,16,8,10,8,*,8,76,8,26,8,20">
         <TextBlock Grid.Column="2" Classes="colhead" Text="#" />
         <TextBlock Grid.Column="6" Classes="colhead" Text="Label · In – Out" />
@@ -36,7 +41,7 @@
       </Grid>
     </Border>
 
-    <Panel Grid.Row="2" IsVisible="{Binding IsClipsTab}">
+    <Panel Grid.Row="3" IsVisible="{Binding IsClipsTab}">
       <StackPanel IsVisible="{Binding HasNoClips}" Margin="20,28" Spacing="6" VerticalAlignment="Top">
         <TextBlock Text="No clips yet" Foreground="{StaticResource Text2Brush}" />
         <TextBlock Text="Open a video, then press I and O to mark a segment, or ask Claude to find the parts you want."
@@ -115,7 +120,11 @@
                       </Button.Flyout>
                     </Button>
                     <StackPanel Grid.Column="6" Classes="fade" Spacing="2" VerticalAlignment="Center">
-                      <TextBlock Text="{Binding Label}" Foreground="{StaticResource TextBrush}" TextTrimming="CharacterEllipsis" />
+                      <!-- With several videos, the video the clip is cut from follows its name. -->
+                      <TextBlock Foreground="{StaticResource TextBrush}" TextTrimming="CharacterEllipsis">
+                        <Run Text="{Binding Label}" />
+                        <Run Text="{Binding VideoSuffix}" FontSize="10.5" Foreground="{StaticResource MutedBrush}" />
+                      </TextBlock>
                       <TextBlock Classes="mono" Text="{Binding RangeText}" FontSize="10.5" LetterSpacing="-0.2"
                                  Foreground="{StaticResource MutedBrush}" />
                     </StackPanel>
@@ -139,11 +148,11 @@
     </Panel>
 
     <!-- The wrapper keeps visibility bound to the editor, not to the panel's data context. -->
-    <Panel Grid.Row="1" Grid.RowSpan="2" IsVisible="{Binding IsTranscriptTab}">
+    <Panel Grid.Row="1" Grid.RowSpan="3" IsVisible="{Binding IsTranscriptTab}">
       <v:TranscriptPanel DataContext="{Binding TranscriptPanel}" />
     </Panel>
 
-    <Border Grid.Row="3" BorderBrush="{StaticResource DividerBrush}" BorderThickness="0,1,0,0" Padding="16,0">
+    <Border Grid.Row="4" BorderBrush="{StaticResource DividerBrush}" BorderThickness="0,1,0,0" Padding="16,0">
       <Grid ColumnDefinitions="Auto,Auto,*,Auto">
         <TextBlock Text="Output" FontSize="11.5" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center" />
         <TextBlock Grid.Column="1" Text="{Binding OutputSummary}" FontSize="11.5" Foreground="{StaticResource Text2Brush}"

@@ -14,11 +14,11 @@ public class KeyMapTests
     public void Catalog_lists_the_designs_groups_and_names_in_order()
     {
         var groups = KeyMap.Catalog.GroupBy(i => i.Group).Select(g => (g.Key, g.Count())).ToList();
-        Assert.Equal([("Playback", 7), ("Editing", 7), ("File", 5), ("View", 3)], groups);
+        Assert.Equal([("Playback", 7), ("Editing", 7), ("File", 6), ("View", 3)], groups);
         Assert.Equal(
             ["Play / pause", "Previous frame", "Next frame", "Jump back", "Jump forward", "Set in point", "Set out point",
              "Split at playhead", "Join with next clip", "Exclude / keep clip", "Delete clip", "Select tool", "Undo", "Redo",
-             "Open video", "Open project", "Save", "Save as", "Export",
+             "Open video", "Open project", "Add video", "Save", "Save as", "Export",
              "Zoom in", "Zoom out", "Fit timeline"],
             KeyMap.Catalog.Select(i => i.Name));
         for (int i = 0; i < KeyMap.Catalog.Count; i++)
@@ -48,6 +48,7 @@ public class KeyMapTests
             [ShortcutAction.Redo] = ["Ctrl Y", "Ctrl Shift Z"],
             [ShortcutAction.OpenVideo] = ["Ctrl O"],
             [ShortcutAction.OpenProject] = ["Ctrl Shift O"],
+            [ShortcutAction.AddVideo] = ["Ctrl Shift A"],
             [ShortcutAction.Save] = ["Ctrl S"],
             [ShortcutAction.SaveAs] = ["Ctrl Shift S"],
             [ShortcutAction.Export] = ["Ctrl E"],

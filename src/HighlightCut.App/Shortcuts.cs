@@ -98,6 +98,9 @@ public static class Shortcuts
             return false;
         switch (action)
         {
+            case ShortcutAction.AddVideo:
+                editor.AddVideoCommand.Execute(null);
+                return true;
             case ShortcutAction.PlayPause:
                 editor.TogglePlay();
                 break;

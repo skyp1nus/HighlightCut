@@ -47,6 +47,13 @@
             </ItemsControl.ItemsPanel>
             <ItemsControl.ItemTemplate>
               <DataTemplate x:DataType="vm:TranscriptParagraphViewModel">
+                <StackPanel>
+                <!-- With several videos: a thin rule and the video's name where its words begin. -->
+                <Grid ColumnDefinitions="Auto,8,*" Margin="12,10,14,2" IsVisible="{Binding HasVideo}">
+                  <TextBlock Text="{Binding Video}" FontSize="10.5" FontWeight="Medium" Foreground="{StaticResource Text4Brush}"
+                             VerticalAlignment="Center" TextTrimming="CharacterEllipsis" MaxWidth="260" />
+                  <Border Grid.Column="2" Height="1" Background="{StaticResource DividerBrush}" VerticalAlignment="Center" />
+                </Grid>
                 <Grid ColumnDefinitions="40,10,*" Margin="12,6,14,6">
                   <Button Classes="stamp" ToolTip.Tip="Move the playhead here" Command="{Binding SeekCommand}">
                     <TextBlock Classes="mono" Text="{Binding TimeText}" FontSize="10.5" />
@@ -68,6 +75,7 @@
                     </ItemsControl.ItemTemplate>
                   </ItemsControl>
                 </Grid>
+                </StackPanel>
               </DataTemplate>
             </ItemsControl.ItemTemplate>
           </ItemsControl>

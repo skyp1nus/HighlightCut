@@ -1,0 +1,87 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:HighlightCut.App.ViewModels"
+             xmlns:c="using:HighlightCut.App.Controls"
+             x:Class="HighlightCut.App.Views.VideosPanel"
+             x:DataType="vm:EditorViewModel">
+  <!-- The project's videos in timeline order (shown with two or more): drag a row or use the arrows to reorder. -->
+  <Border BorderBrush="{StaticResource DividerBrush}" BorderThickness="0,0,0,1" Padding="0,0,0,4">
+    <StackPanel>
+      <Grid ColumnDefinitions="*,Auto" Height="26" Margin="12,0">
+        <TextBlock Text="{Binding Videos.Count, StringFormat='Videos · {0}'}" FontSize="10" FontWeight="Medium" LetterSpacing="0.2"
+                   Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center" />
+        <Button Grid.Column="1" Classes="ghost" Height="20" Padding="6,0" CornerRadius="5" FontSize="11"
+                Foreground="{StaticResource Text2Brush}" ToolTip.Tip="Add videos after the last one (Ctrl+Shift+A)"
+                Command="{Binding AddVideoCommand}" Content="+ Add video…" />
+      </Grid>
+      <ItemsControl Name="VideoList" ItemsSource="{Binding Videos}">
+        <ItemsControl.ItemTemplate>
+          <DataTemplate x:DataType="vm:VideoViewModel">
+            <Border Classes="video" Height="30" Padding="12,0" Classes.over="{Binding IsDropTarget}"
+                    Classes.dragging="{Binding IsDragSource}" ToolTip.Tip="{Binding Tip}">
+              <Panel>
+                <Border Classes="dropline" Height="1" VerticalAlignment="Top" Margin="-12,0" />
+                <Grid ColumnDefinitions="16,6,*,8,Auto,8,Auto" IsVisible="{Binding !IsConfirmingRemove}">
+                  <TextBlock Classes="mono" Text="{Binding Number}" FontSize="11" Foreground="{StaticResource MutedBrush}"
+                             VerticalAlignment="Center" Cursor="SizeAll" />
+                  <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center" ClipToBounds="True">
+                    <TextBlock Text="{Binding Name}" Foreground="{StaticResource TextBrush}" TextTrimming="CharacterEllipsis" MaxWidth="150" />
+                    <TextBlock Classes="mono" Text="{Binding PlaceText}" FontSize="10.5" Foreground="{StaticResource MutedBrush}" />
+                  </StackPanel>
+                  <TextBlock Grid.Column="4" Classes="mono" Text="{Binding DurationText}" FontSize="11" Foreground="{StaticResource Text2Brush}"
+                             VerticalAlignment="Center" />
+                  <StackPanel Grid.Column="6" Orientation="Horizontal" Spacing="2" VerticalAlignment="Center">
+                    <Button Classes="ghost" Width="20" Height="20" CornerRadius="5" ToolTip.Tip="Move earlier on the timeline"
+                            IsEnabled="{Binding CanMoveUp}" Command="{Binding MoveUpCommand}">
+                      <c:SvgIcon Data="{StaticResource IconChevronUp10}" ViewBox="10" StrokeWidth="1.2" Width="10" Height="10" />
+                    </Button>
+                    <Button Classes="ghost" Width="20" Height="20" CornerRadius="5" ToolTip.Tip="Move later on the timeline"
+                            IsEnabled="{Binding CanMoveDown}" Command="{Binding MoveDownCommand}">
+                      <c:SvgIcon Data="{StaticResource IconChevronDown10}" ViewBox="10" StrokeWidth="1.2" Width="10" Height="10" />
+                    </Button>
+                    <Button Classes="ghost risky" Width="20" Height="20" CornerRadius="5" ToolTip.Tip="Remove the video and its clips"
+                            Command="{Binding RemoveCommand}">
+                      <c:SvgIcon Data="{StaticResource IconRemove10}" ViewBox="10" StrokeWidth="1.2" LineCap="Flat" Width="10" Height="10" />
+                    </Button>
+                  </StackPanel>
+                </Grid>
+                <!-- Removing a video with clips asks first, in the row. -->
+                <Grid ColumnDefinitions="*,Auto" IsVisible="{Binding IsConfirmingRemove}">
+                  <TextBlock VerticalAlignment="Center" Foreground="{StaticResource TextBrush}" TextTrimming="CharacterEllipsis">
+                    <Run Text="{Binding Name}" />
+                    <Run Text="·" Foreground="{StaticResource MutedBrush}" />
+                    <Run Text="{Binding ConfirmText}" Foreground="{StaticResource Text2Brush}" />
+                  </TextBlock>
+                  <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
+                    <Button Classes="soft" Height="20" Padding="8,0" CornerRadius="5" FontSize="11" Content="Cancel"
+                            Command="{Binding CancelRemoveCommand}" />
+                    <Button Classes="danger" Height="20" Padding="8,0" CornerRadius="5" FontSize="11" Content="Remove"
+                            Command="{Binding RemoveCommand}" />
+                  </StackPanel>
+                </Grid>
+              </Panel>
+            </Border>
+          </DataTemplate>
+        </ItemsControl.ItemTemplate>
+      </ItemsControl>
+    </StackPanel>
+  </Border>
+
+  <UserControl.Styles>
+    <Style Selector="Border.video">
+      <Setter Property="Background" Value="Transparent" />
+    </Style>
+    <Style Selector="Border.video:pointerover">
+      <Setter Property="Background" Value="{StaticResource ControlBrush}" />
+    </Style>
+    <Style Selector="Border.video.dragging">
+      <Setter Property="Opacity" Value="0.4" />
+    </Style>
+    <Style Selector="Border.dropline">
+      <Setter Property="Background" Value="Transparent" />
+    </Style>
+    <Style Selector="Border.video.over Border.dropline">
+      <Setter Property="Background" Value="{StaticResource Text2Brush}" />
+    </Style>
+  </UserControl.Styles>
+</UserControl>

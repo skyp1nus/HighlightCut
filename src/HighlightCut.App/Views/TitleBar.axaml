@@ -40,6 +40,8 @@
               <MenuFlyout Placement="BottomEdgeAlignedLeft">
                 <MenuItem Header="Open video…" InputGesture="Ctrl+O" Command="{Binding OpenFileCommand}" />
                 <MenuItem Header="Open project…" InputGesture="Ctrl+Shift+O" Command="{Binding OpenProjectCommand}" />
+                <MenuItem Header="Add video…" InputGesture="Ctrl+Shift+A" Command="{Binding AddVideoCommand}"
+                          IsEnabled="{Binding HasFile}" ToolTip.Tip="Add videos after the last one on the timeline" />
                 <MenuItem Header="Save project" InputGesture="Ctrl+S" Command="{Binding SaveProjectCommand}" IsEnabled="{Binding HasFile}" />
                 <MenuItem Header="Save project as…" InputGesture="Ctrl+Shift+S" Command="{Binding SaveProjectAsCommand}" IsEnabled="{Binding HasFile}" />
                 <Separator />

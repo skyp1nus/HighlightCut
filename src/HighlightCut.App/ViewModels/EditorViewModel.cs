@@ -198,14 +198,15 @@ public sealed partial class EditorViewModel : ViewModelBase
     public partial IMediaPreview? Media { get; set; }
 
     /// <summary>Width / height of the picture, for the player frame (16:9 until a file is open).</summary>
-    public double VideoAspect => Media?.AspectRatio is > 0 and var ratio ? ratio : 16.0 / 9.0;
+    public double VideoAspect => (CurrentVideoPreview ?? Media)?.AspectRatio is > 0 and var ratio ? ratio : 16.0 / 9.0;
 
     partial void OnMediaChanged(IMediaPreview? oldValue, IMediaPreview? newValue)
     {
         if (oldValue is not null)
         {
             oldValue.Changed -= OnPreviewChanged;
-            (oldValue as IDisposable)?.Dispose();
+            // Each video's preview belongs to the editor (_previews); the timeline of several is only a view of them.
+            (oldValue as TimelinePreview)?.Dispose();
         }
         if (newValue is not null)
             newValue.Changed += OnPreviewChanged;
@@ -266,7 +267,7 @@ public sealed partial class EditorViewModel : ViewModelBase
     public bool HasFile => Media is not null && Session.Project.Source is not null;
     public bool IsEmpty => !HasFile;
     public double Duration => HasFile ? Session.Project.TimelineDuration : PlaceholderDuration;
-    public double FrameRate => Session.Project.Source?.FrameRate is > 0 and var fps ? fps : 30;
+    public double FrameRate => (Session.Project.SourceAt(Time) ?? Session.Project.Source)?.FrameRate is > 0 and var fps ? fps : 30;
     public string DurationText => TimeFormat.Timecode(Duration);
 
     /// <summary>Duration next to the player's timecode; zero until a file is open.</summary>
@@ -278,7 +279,9 @@ public sealed partial class EditorViewModel : ViewModelBase
     public string ProjectTitle => HasFile ? ProjectName : "Untitled";
 
     /// <summary>Media details in the status bar, or "No file open".</summary>
-    public string MediaInfoText => HasFile && MediaInfo.Length > 0 ? MediaInfo : HasFile ? MediaFileName : "No file open";
+    public string MediaInfoText => !HasFile ? "No file open"
+        : HasSeveralVideos ? $"{Session.Project.Sources.Count} videos  ·  {TimeFormat.WholeSeconds(Duration)}  ·  {(MediaInfo.Length > 0 ? MediaInfo : MediaFileName)}"
+        : MediaInfo.Length > 0 ? MediaInfo : MediaFileName;
 
     /// <summary>
     /// What draws the video, as the video view reports it: "OpenGL · (the GPU)", "software", "none: why", or null before
@@ -663,7 +666,11 @@ public sealed partial class EditorViewModel : ViewModelBase
     // ---- Loading -------------------------------------------------------------------------
 
     /// <summary>Opens a project with its media preview. Clears the undo history.</summary>
-    public void LoadProject(Project project, IMediaPreview media, string info, string? projectPath = null)
+    public void LoadProject(Project project, IMediaPreview media, string info, string? projectPath = null) =>
+        LoadProject(project, new Dictionary<int, IMediaPreview> { [project.Source?.Id ?? SourceMedia.FirstId] = media }, info, projectPath);
+
+    /// <summary>Opens a project with a preview for each of its videos (by video id). Clears the undo history.</summary>
+    public void LoadProject(Project project, IReadOnlyDictionary<int, IMediaPreview> previews, string info, string? projectPath = null)
     {
         StopPlayback();
         SetPlayerLoaded(false);
@@ -674,6 +681,8 @@ public sealed partial class EditorViewModel : ViewModelBase
         ProjectPath = projectPath;
         IsDirty = false;
         LastSaveWasAuto = false;
+        ReplacePreviews(previews);
+        var media = MediaFor(project);
         // Read once: the analysis may publish the keyframes between two reads, and the second would then
         // look already applied to OnPreviewChanged.
         var keyframes = media.Keyframes;
@@ -685,8 +694,8 @@ public sealed partial class EditorViewModel : ViewModelBase
         CreateAudioLanes(project);
         Time = 0;
         RaiseProjectReplaced();
-        if (_player is not null && media.IsPlayable && project.Source is { } source)
-            _ = LoadPlayerAsync(source.Path);
+        if (_player is not null && media.IsPlayable && project.Source is not null)
+            _ = LoadPlayerAsync(PlayerPath(project));
         else
             UnloadPlayer();
         if (Settings.TranscribeOnOpen)
@@ -746,7 +755,7 @@ public sealed partial class EditorViewModel : ViewModelBase
     }
 
     /// <summary>Opens the file in the player; until it is ready (or if it fails) playback is simulated.</summary>
-    private async Task LoadPlayerAsync(string path)
+    private async Task LoadPlayerAsync(string path, bool play = false)
     {
         int generation = ++_playerGeneration;
         SetPlayerLoaded(false);
@@ -773,6 +782,11 @@ public sealed partial class EditorViewModel : ViewModelBase
         ApplyAudioTracks();
         if (Time > 0)
             _player.Seek(Time);
+        if (play)
+        {
+            _player.Play();
+            IsPlaying = true;
+        }
     }
 
     private void UnloadPlayer()
@@ -817,7 +831,7 @@ public sealed partial class EditorViewModel : ViewModelBase
     {
         foreach (string name in (string[])[nameof(ProjectName), nameof(WindowTitle), nameof(ProjectTitle), nameof(MediaInfoText),
                      nameof(HasSilenceData), nameof(HasSceneData), nameof(CanToggleScenes), nameof(ScenesOn), nameof(HasFile), nameof(IsEmpty),
-                     nameof(TransportDurationText),
+                     nameof(TransportDurationText), nameof(HasSeveralVideos), nameof(PreviewParts),
                      nameof(Duration), nameof(DurationText), nameof(SourceLengthText), nameof(FrameRate), nameof(FrameText),
                      nameof(StatusRight)])
             OnPropertyChanged(name);
@@ -832,6 +846,7 @@ public sealed partial class EditorViewModel : ViewModelBase
         Export.Close();
         Select(null);
         Media = null;
+        ReplacePreviews(new Dictionary<int, IMediaPreview>());
         Processing.Track(null);
         MediaFileName = "";
         MediaInfo = "";
@@ -922,20 +937,26 @@ public sealed partial class EditorViewModel : ViewModelBase
             OpenFailed("The project has no source video.");
             return;
         }
-        // Projects with several videos open once the timeline and the player can show them (see docs/architecture.md).
-        if (project.Sources.Count > 1)
+        // Every video is probed; the probe is the truth about the file (it may have been re-encoded since), the clips are kept.
+        var previews = new Dictionary<int, IMediaPreview>();
+        string? summary = null;
+        foreach (var source in project.Sources)
         {
-            OpenFailed($"The project has {project.Sources.Count} videos; this version of HighlightCut opens projects with one video.");
-            return;
+            var media = await OpenSourceAsync(source.Path).ConfigureAwait(true);
+            if (media is null)
+            {
+                foreach (var opened in previews.Values)
+                    (opened as IDisposable)?.Dispose();
+                return;
+            }
+            previews[source.Id] = media.Preview;
+            summary ??= media.Summary;
+            project = project.WithSource(media.Source with { Id = source.Id });
         }
-        var media = await OpenSourceAsync(project.Source.Path).ConfigureAwait(true);
-        if (media is null)
-            return;
         LeaveDemo();
-        // The probe is the truth about the file (it may have been re-encoded since); the clips are kept.
-        LoadProject(project.WithSource(media.Source with { Id = project.Source.Id }), media.Preview, media.Summary, path);
+        LoadProject(project, previews, summary!, path);
         _openedPath = path;
-        Remember(path, media.Source.Duration);
+        Remember(path, project.TimelineDuration);
     }
 
     /// <summary>Opens a video or project for Claude (MCP). Returns why it failed, or null.</summary>
@@ -1437,7 +1458,10 @@ public sealed partial class EditorViewModel : ViewModelBase
 
     private void OnSessionChanged(object? sender, ProjectChangedEventArgs e)
     {
+        if (e.Kind != ProjectChangeKind.Loaded && !e.Previous.Sources.SequenceEqual(e.Current.Sources))
+            OnSourcesChanged(e.Current);
         SyncClips(e.Current);
+        SyncVideos(e.Current);
         SyncAudioLanes(e.Current);
         if (e.Kind != ProjectChangeKind.Loaded)
         {
@@ -1475,10 +1499,10 @@ public sealed partial class EditorViewModel : ViewModelBase
             int at = IndexOfClip(clip.Id);
             if (at < 0)
             {
-                Clips.Insert(i, new ClipViewModel(clip, SetIncluded, SetColor));
+                Clips.Insert(i, new ClipViewModel(clip, SetIncluded, SetColor, project));
                 continue;
             }
-            Clips[at].Update(clip);
+            Clips[at].Update(clip, project);
             if (at != i)
                 Clips.Move(at, i);
         }
@@ -1550,6 +1574,7 @@ public sealed partial class EditorViewModel : ViewModelBase
 
     partial void OnTimeChanged(double value)
     {
+        FollowLaneVideo();
         OnPropertyChanged(nameof(CurrentClip));
         OnPropertyChanged(nameof(IsInClip));
         OnPropertyChanged(nameof(IsInExcluded));

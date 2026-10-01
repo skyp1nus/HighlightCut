@@ -42,9 +42,15 @@ public sealed partial class DesignSample : IMediaPreview
     private static readonly IBrush PlayerText = new SolidColorBrush(Color.Parse("#71717a"));
 
     private readonly double[] _keyframes;
+    private readonly int _audioStreams;
+    private readonly int _variant;
 
-    public DesignSample()
+    /// <param name="audioStreams">Audio tracks the sample has (the design's has one).</param>
+    /// <param name="variant">Shifts the placeholder waveform and pictures, so several samples side by side differ.</param>
+    public DesignSample(int audioStreams = 1, int variant = 0)
     {
+        _audioStreams = audioStreams;
+        _variant = variant;
         var kf = new List<double>();
         for (double t = 0; t <= SampleDuration; t += KeyframeInterval)
             kf.Add(t);
@@ -73,7 +79,7 @@ public sealed partial class DesignSample : IMediaPreview
     public IReadOnlyList<double> Keyframes => _keyframes;
     public IReadOnlyList<TimeRange> Silences => SilenceRanges;
     public IReadOnlyList<double> SceneChanges => Scenes;
-    public int AudioStreamCount => 1;
+    public int AudioStreamCount => _audioStreams;
 
     /// <summary>The sample draws its own placeholder picture (the player's overlay is not needed).</summary>
     public bool IsPlaceholder => false;
@@ -98,7 +104,8 @@ public sealed partial class DesignSample : IMediaPreview
     public double AudioPeak(int stream, double startTime, double endTime)
     {
         int i = (int)Math.Floor((startTime + endTime) / 2 / SampleDuration * WaveformBars);
-        return BarLevel(Math.Clamp(i, 0, WaveformBars - 1));
+        int shift = (_variant * 97 + stream * 53) % WaveformBars;
+        return BarLevel((Math.Clamp(i, 0, WaveformBars - 1) + shift) % WaveformBars) * (stream > 0 ? 0.7 : 1);
     }
 
     public void DrawFrame(DrawingContext context, Rect rect, double time, FrameLook look, int variant)
@@ -111,7 +118,7 @@ public sealed partial class DesignSample : IMediaPreview
             context.DrawText(text, new Point(rect.X + (rect.Width - text.Width) / 2, rect.Y + (rect.Height - text.Height) / 2));
             return;
         }
-        var (a, b) = Tones[Scenes.Count(x => x <= time) % Tones.Length];
+        var (a, b) = Tones[(Scenes.Count(x => x <= time) + _variant * 2) % Tones.Length];
         Stripes.Draw(context, rect, a, b, 6);
     }
 }

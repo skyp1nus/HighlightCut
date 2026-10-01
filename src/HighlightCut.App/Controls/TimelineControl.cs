@@ -112,6 +112,19 @@ public sealed class TimelineControl : Control, ICustomHitTest
     private static readonly IBrush LaneCurrent = White(0.16);
     private static readonly IBrush LaneSelected = new SolidColorBrush(Color.FromArgb(77, 59, 130, 246));
     private static readonly IBrush LanePending = White(0.035);
+    // Where one video ends and the next begins: a bright line down the tracks and the next video's name on the ruler.
+    private static readonly IBrush JoinLine = White(0.55);
+    private static readonly IBrush JoinShade = new SolidColorBrush(Color.FromArgb(140, 0, 0, 0));
+    private static readonly IBrush JoinTagBg = new SolidColorBrush(Color.Parse("#2A2C31"));
+    private static readonly IBrush JoinTagText = new SolidColorBrush(Color.Parse("#E4E4E7"));
+    private static readonly IBrush NoTrackHatch = White(0.035);
+    private static readonly IBrush AddBg = new SolidColorBrush(Color.Parse("#26282D"));
+    private static readonly IBrush AddBgHover = new SolidColorBrush(Color.Parse("#34363C"));
+    private static readonly IBrush DropFill = new SolidColorBrush(Color.FromArgb(46, 59, 130, 246));
+    private static readonly IPen DropPen = new Pen(new SolidColorBrush(Color.FromArgb(200, 59, 130, 246)), 1, new DashStyle([4, 3], 0));
+
+    /// <summary>The "+" at the end of the timeline (Add video…).</summary>
+    private const double AddSize = 18;
 
     private readonly List<HitRegion> _hits = [];
     private readonly List<(int Word, Rect Rect)> _laneHits = [];
@@ -126,6 +139,10 @@ public sealed class TimelineControl : Control, ICustomHitTest
     private DateTime _pulseStart = DateTime.UtcNow;
     private int _laneVersion = -1;
     private bool _placed;
+    private bool _hover;
+    private bool _dropHover;
+    private Rect _addButton;
+    private Point? _pointer;
 
     static TimelineControl()
     {
@@ -135,6 +152,19 @@ public sealed class TimelineControl : Control, ICustomHitTest
     }
 
     public EditorViewModel? Editor { get => GetValue(EditorProperty); set => SetValue(EditorProperty, value); }
+
+    /// <summary>Video files are being dragged over the timeline: dropping them adds them at its end.</summary>
+    public bool DropHover
+    {
+        get => _dropHover;
+        set
+        {
+            if (_dropHover == value)
+                return;
+            _dropHover = value;
+            InvalidateVisual();
+        }
+    }
     public double ScrollOffset { get => GetValue(ScrollOffsetProperty); set => SetValue(ScrollOffsetProperty, value); }
     public double ExtentWidth { get => _extentWidth; private set => SetAndRaise(ExtentWidthProperty, ref _extentWidth, value); }
     public double MaxScroll { get => _maxScroll; private set => SetAndRaise(MaxScrollProperty, ref _maxScroll, value); }
@@ -326,6 +356,8 @@ public sealed class TimelineControl : Control, ICustomHitTest
             DrawHandles(context, clip, visible);
         DrawRings(context, editor, visible);
         DrawJoin(context, editor);
+        DrawVideoJoins(context, editor, visible);
+        DrawAddButton(context, editor, visible);
         DrawPlayhead(context, editor);
     }
 
@@ -434,7 +466,10 @@ public sealed class TimelineControl : Control, ICustomHitTest
             if (!editor.ShowFrames)
                 ctx.FillRectangle(PlainTrack, new Rect(visible.Left, VideoTop, visible.Width, VideoHeight));
             else
-                DrawThumbnails(ctx, media, visible, w);
+            {
+                foreach (var part in editor.PreviewParts)
+                    DrawThumbnails(ctx, part, visible);
+            }
 
             if (editor.ShowKeyframes)
                 DrawKeyframes(ctx, media, visible);
@@ -447,15 +482,22 @@ public sealed class TimelineControl : Control, ICustomHitTest
         ctx.FillRectangle(TrackLine, new Rect(visible.Left, VideoTop, visible.Width, 1));
     }
 
-    /// <summary>A row of thumbnails across the video track, more of them as it zooms in.</summary>
-    private void DrawThumbnails(DrawingContext ctx, IMediaPreview media, Rect visible, double w)
+    /// <summary>
+    /// A row of thumbnails across a video's part of the video track, more of them as it zooms in. Each video fills its own
+    /// part, so a join falls between two thumbnails.
+    /// </summary>
+    private void DrawThumbnails(DrawingContext ctx, PreviewPart part, Rect visible)
     {
-        int n = Math.Max(1, (int)Math.Round(FramesAtFit * Zoom));
+        double left = X(part.Offset), w = X(part.End) - left;
+        if (w <= 0 || left > visible.Right || left + w < visible.Left)
+            return;
+        int n = Math.Max(1, (int)Math.Round(FramesAtFit * Zoom * part.Duration / Math.Max(1e-9, Duration)));
         double fw = w / n;
-        for (int i = (int)Math.Max(0, Math.Floor(visible.Left / fw)); i < n && i * fw < visible.Right; i++)
+        using var clip = ctx.PushClip(new Rect(left, VideoTop, w, VideoHeight));
+        for (int i = (int)Math.Max(0, Math.Floor((visible.Left - left) / fw)); i < n && left + i * fw < visible.Right; i++)
         {
-            var r = new Rect(i * fw, VideoTop, fw, VideoHeight);
-            media.DrawFrame(ctx, r, (i + 0.5) / n * Duration, FrameLook.Thumbnail, i);
+            var r = new Rect(left + i * fw, VideoTop, fw, VideoHeight);
+            part.Preview.DrawFrame(ctx, r, (i + 0.5) / n * part.Duration, FrameLook.Thumbnail, i);
             ctx.FillRectangle(FrameGap, new Rect(Math.Round(r.Right) - 1, r.Y, 1, r.Height));
         }
     }
@@ -520,38 +562,59 @@ public sealed class TimelineControl : Control, ICustomHitTest
         if (bw <= 0)
             return;
         var included = editor.Clips.Where(c => c.IsIncluded).Select(c => (c.Start, c.End)).ToList();
-        int first = (int)Math.Max(0, Math.Floor(visible.Left / pitch) - 1);
-        for (int lane = 0; lane < lanes; lane++)
+        var project = editor.Session.Project;
+        var parts = editor.PreviewParts;
+        // Each video draws its own tracks on the lanes (track N on lane N), at its own volume and mute; a bar belongs to the
+        // video its middle is in.
+        for (int p = 0; p < parts.Count; p++)
         {
-            if (lane >= media.AudioStreamCount)
-                break;
-            double top = AudioTop + 6 + lane * laneHeight;
-            using var fade = ctx.PushOpacity(lane < editor.AudioLanes.Count && editor.AudioLanes[lane].IsMuted ? 0.3 : 1);
-            // Drawn as it will sound: the lane's volume moves the bars up or down the dB scale.
-            double gainDb = lane < editor.AudioLanes.Count ? editor.AudioLanes[lane].GainDb : 0;
-            // Hundreds of bars a lane: one shape for those in a clip and one for the rest, rather than a draw call each.
-            var barsIn = new StreamGeometry();
-            var barsOut = new StreamGeometry();
-            using (var gIn = barsIn.Open())
-            using (var gOut = barsOut.Open())
+            var part = parts[p];
+            var tracks = project.FindSource(part.SourceId)?.AudioTracks ?? [];
+            double partLeft = X(part.Offset), partRight = X(part.End);
+            if (partRight < visible.Left || partLeft > visible.Right)
+                continue;
+            int first = (int)Math.Max(0, Math.Floor(Math.Max(visible.Left, partLeft) / pitch) - 1);
+            for (int lane = 0; lane < lanes; lane++)
             {
-                for (int k = first; k < count; k++)
+                double top = AudioTop + 6 + lane * laneHeight;
+                if (lane >= part.Preview.AudioStreamCount || lane >= tracks.Length)
                 {
-                    double x = k * pitch;
-                    if (x > visible.Right)
-                        break;
-                    double t0 = k * Duration / count, t1 = (k + 1) * Duration / count;
-                    double level = WaveformData.WithGain(media.AudioPeak(lane, t0, t1), gainDb);
-                    double h = Math.Round(level * 1000) / 1000 * laneHeight;
-                    if (h <= 0)
-                        continue;
-                    double mid = (t0 + t1) / 2;
-                    bool inClip = included.Any(c => mid >= c.Start && mid <= c.End);
-                    AddRectangle(inClip ? gIn : gOut, new Rect(x, top + (laneHeight - h) / 2, bw, h));
+                    // This video has no such track: the lane is hatched over its part.
+                    if (parts.Count > 1)
+                        Hatch.Draw(ctx, new Rect(partLeft, top, partRight - partLeft, laneHeight), visible, NoTrackHatch, 6, 2);
+                    continue;
                 }
+                var mix = project.MixOf(part.SourceId, tracks[lane].Index);
+                using var fade = ctx.PushOpacity(mix.IsMuted ? 0.3 : 1);
+                // Hundreds of bars a lane: one shape for those in a clip and one for the rest, rather than a draw call each.
+                var barsIn = new StreamGeometry();
+                var barsOut = new StreamGeometry();
+                using (var gIn = barsIn.Open())
+                using (var gOut = barsOut.Open())
+                {
+                    for (int k = first; k < count; k++)
+                    {
+                        double x = k * pitch;
+                        if (x > visible.Right)
+                            break;
+                        double t0 = k * Duration / count, t1 = (k + 1) * Duration / count;
+                        double mid = (t0 + t1) / 2;
+                        if (mid < part.Offset && p > 0)
+                            continue;
+                        if (mid >= part.End && p < parts.Count - 1)
+                            break;
+                        // Drawn as it will sound: the track's volume moves the bars up or down the dB scale.
+                        double level = WaveformData.WithGain(part.Preview.AudioPeak(lane, t0 - part.Offset, t1 - part.Offset), mix.GainDb);
+                        double h = Math.Round(level * 1000) / 1000 * laneHeight;
+                        if (h <= 0)
+                            continue;
+                        bool inClip = included.Any(c => mid >= c.Start && mid <= c.End);
+                        AddRectangle(inClip ? gIn : gOut, new Rect(x, top + (laneHeight - h) / 2, bw, h));
+                    }
+                }
+                ctx.DrawGeometry(BarIn, null, barsIn);
+                ctx.DrawGeometry(BarOut, null, barsOut);
             }
-            ctx.DrawGeometry(BarIn, null, barsIn);
-            ctx.DrawGeometry(BarOut, null, barsOut);
         }
     }
 
@@ -775,6 +838,72 @@ public sealed class TimelineControl : Control, ICustomHitTest
         ctx.FillRectangle(SnapLine, new Rect(x - 0.5, VideoTop, 1, TotalHeight - VideoTop));
     }
 
+    /// <summary>
+    /// With several videos, where each one starts: a line down the tracks (shaded on its left so it reads as an edge) and
+    /// the video's name on the ruler, from where it starts. Nothing with one video.
+    /// </summary>
+    private void DrawVideoJoins(DrawingContext ctx, EditorViewModel editor, Rect visible)
+    {
+        var parts = editor.PreviewParts;
+        if (parts.Count < 2)
+            return;
+        for (int i = 0; i < parts.Count; i++)
+        {
+            var part = parts[i];
+            double x = Math.Round(X(part.Offset));
+            if (x > visible.Right || X(part.End) < visible.Left)
+                continue;
+            if (i > 0)
+            {
+                ctx.FillRectangle(JoinShade, new Rect(x - 3, VideoTop, 3, TotalHeight - VideoTop));
+                ctx.FillRectangle(JoinLine, new Rect(x - 1, 0, 2, TotalHeight));
+            }
+            // The name tag stays in view while its video is: it slides along with the scroll up to the video's end.
+            var name = Text($"{i + 1}  {part.Name}", SansFace(FontWeight.Medium), 10, JoinTagText, 220);
+            double width = name.WidthIncludingTrailingWhitespace + 12;
+            double left = Math.Min(Math.Max(x + (i > 0 ? 1 : 0), visible.Left), X(part.End) - width - 2);
+            if (left < x - 0.5 && i > 0)
+                left = x + 1;
+            var tag = new Rect(left, 1, width, 14);
+            if (tag.Width > 16)
+            {
+                ctx.DrawRectangle(JoinTagBg, null, new RoundedRect(tag, i > 0 ? 0 : 3, 3, 3, i > 0 ? 0 : 3));
+                ctx.DrawText(name, new Point(tag.X + 6, tag.Y + (tag.Height - name.Height) / 2));
+            }
+        }
+    }
+
+    /// <summary>
+    /// The "+" at the end of the timeline adds videos after the last one. It shows while the pointer is over the timeline
+    /// (and always once there are several videos); dragging files over the timeline outlines where they go.
+    /// </summary>
+    private void DrawAddButton(DrawingContext ctx, EditorViewModel editor, Rect visible)
+    {
+        _addButton = default;
+        if (DropHover)
+        {
+            var zone = new Rect(visible.Left + 1, VideoTop + 1, visible.Width - 2, TotalHeight - VideoTop - 2);
+            ctx.DrawRectangle(DropFill, DropPen, new RoundedRect(zone, 4));
+            var hint = Text("Drop to add after the last video", SansFace(FontWeight.Medium), 12, Brushes.White);
+            ctx.DrawText(hint, new Point(Math.Round(zone.Center.X - hint.Width / 2), Math.Round(zone.Center.Y - hint.Height / 2)));
+            return;
+        }
+        if (!_hover && !editor.HasSeveralVideos)
+            return;
+        double end = X(Duration);
+        double x = Math.Min(end, visible.Right) - AddSize - 4;
+        if (x + AddSize < visible.Left)
+            return;
+        _addButton = new Rect(x, VideoTop + (VideoHeight - AddSize) / 2, AddSize, AddSize);
+        bool over = _pointer is { } p && _addButton.Contains(new Point(p.X + Scroll, p.Y));
+        ctx.DrawRectangle(over ? AddBgHover : AddBg, new Pen(White(0.25), 1), new RoundedRect(_addButton, AddSize / 2));
+        var c = _addButton.Center;
+        ctx.FillRectangle(Brushes.White, new Rect(Math.Round(c.X) - 4, Math.Round(c.Y) - 0.5, 8, 1.5));
+        ctx.FillRectangle(Brushes.White, new Rect(Math.Round(c.X) - 0.5, Math.Round(c.Y) - 4, 1.5, 8));
+    }
+
+    private bool OnAddButton(Point p) => _addButton.Width > 0 && _addButton.Inflate(2).Contains(new Point(p.X + Scroll, p.Y));
+
     private void DrawPlayhead(DrawingContext ctx, EditorViewModel editor)
     {
         double x = X(editor.Time);
@@ -831,6 +960,12 @@ public sealed class TimelineControl : Control, ICustomHitTest
         }
         if (!e.GetCurrentPoint(this).Properties.IsLeftButtonPressed)
             return;
+        if (OnAddButton(p))
+        {
+            editor.AddVideoCommand.Execute(null);
+            e.Handled = true;
+            return;
+        }
         double t = Math.Clamp(T(p.X + Scroll), 0, Duration);
         var hit = HitTest(p);
         if (InLane(p) && hit?.Kind is not (HitKind.TrimIn or HitKind.TrimOut))
@@ -879,6 +1014,13 @@ public sealed class TimelineControl : Control, ICustomHitTest
         var p = e.GetPosition(this);
         if (editor is null)
             return;
+        bool wasOver = _pointer is { } before && OnAddButton(before);
+        _pointer = p;
+        if (!_hover || wasOver != OnAddButton(p))
+        {
+            _hover = true;
+            InvalidateVisual();
+        }
         if (_drag.Kind != DragKind.None && !_drag.Moved)
         {
             // A hand that shakes while clicking leaves the playhead where it was put.
@@ -900,6 +1042,13 @@ public sealed class TimelineControl : Control, ICustomHitTest
                 return;
         }
 
+        if (OnAddButton(p))
+        {
+            Cursor = new Cursor(StandardCursorType.Hand);
+            ToolTip.SetTip(this, "Add video… (at the end of the timeline)");
+            return;
+        }
+        ToolTip.SetTip(this, null);
         var hit = editor.HasFile ? HitTest(p) : null;
         if (InLane(p) && hit?.Kind is not (HitKind.TrimIn or HitKind.TrimOut))
         {
@@ -921,6 +1070,14 @@ public sealed class TimelineControl : Control, ICustomHitTest
             e.Pointer.Capture(null);
             InvalidateVisual();
         }
+    }
+
+    protected override void OnPointerExited(PointerEventArgs e)
+    {
+        base.OnPointerExited(e);
+        _hover = false;
+        _pointer = null;
+        InvalidateVisual();
     }
 
     protected override void OnPointerCaptureLost(PointerCaptureLostEventArgs e)

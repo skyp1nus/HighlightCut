@@ -127,24 +127,48 @@ project the app makes today and every file saved before, works exactly as before
 - **Audio** is per video: `TrackMix.SourceId` and `Project.MixOf(video, stream)`, since each file has its own tracks.
 - **Keyframes** for snapping (`EditorSession.Keyframes`) are timeline times: each video's keyframes moved by its offset.
 
-### What part 1 does, and what comes next
+### In the app
 
-Part 1 is the model above, the project file (version 2) and Claude's tools in timeline seconds. The app opens, edits and
-saves one-video projects as before; a project file with several videos is refused on open ("The project has 2 videos;
-this version of HighlightCut opens projects with one video."), and `ExportPlanner` refuses one, so nothing plays or
-exports the wrong file. On top of the model:
+The app opens, edits, plays and saves projects with several videos (part 2); only the export waits for part 3
+(`ExportPlanner` still refuses a project with several, with a reason). A project with one video looks and behaves as
+before: its preview is the file's own and the player loads the file.
 
-- **The app (part 2)**: adding (appends, `EditorSession.AddSource`), removing and reordering videos, with undo; the
-  timeline drawn over `TimelineDuration` with each clip at `TimelineRange` and a mark at each join; the player
-  following the playhead across videos (`ToSource` picks the file and the time; loading the next file at a join); the
-  analyses per video (waveform, keyframes, thumbnails, scenes, silences, transcript, each read and cached per file as
-  today) drawn and searched at their offsets, keyframes handed to the session on the timeline; audio lanes per video
-  (`MixOf(video, stream)`); the transcript and "Cut out" mapping words to their video. Then the open refusal goes.
+- **Opening**: a project file's videos are probed one by one (`Project.WithSource` keeps each id); one that is missing
+  stops the open with the same message as a missing source ("part2.mp4 was not found…").
+- **Adding, removing, moving** (`EditorViewModel.Videos.cs`): Add video… in the project menu (Ctrl+Shift+A, Settings →
+  Keyboard), the + at the end of the timeline (on hover; always shown with several) and files dropped onto the timeline
+  (`MainWindow.OnDrop`; a drop anywhere else still opens the file as a new project, like Ctrl+O and `open_file`)
+  append videos through `AddSourceCommand`, several at once as one `BatchCommand`. The Videos list (`VideosPanel`,
+  `VideoViewModel`, above the clips with two or more videos) moves them by drag or arrows (`MoveSource`) and removes them
+  (`RemoveSource`); a video with clips asks in its row first. Each is one undo step.
+- **Previews**: the editor keeps one preview per video (`_previews`, by id, also for a removed video until another
+  project opens, so undo brings it back as it was). With several, `Media` is a `TimelinePreview` over them, made again
+  whenever the videos change: keyframes, silences, scene changes and the transcript come out moved by each video's
+  offset (the same objects while nothing changes, so the session's keyframes and the transcript tab update only when
+  something arrived), thumbnails and waveform peaks come from the video under a time, and every request (the chips,
+  `ReadKeyframesAsync`, `ReadWaveformAsync`, `DetectScenes`…) goes to each video, whose own `MediaPreview` reads and caches
+  it per file as before. So a video added later reads only what the chips ask for. `Activity` and Copy diagnostics say
+  which video ("video 2: reading the audio 40%"). Transcription runs the videos one after another in timeline order
+  (each uses every core); `EditorSession.Keyframes` is set again whenever the videos change.
+- **The timeline** (`TimelineControl`) draws over `TimelineDuration`; `ClipViewModel.Start`/`End` are timeline times
+  (`TimelineRange`), so trims, the magnet, snapping, Split, Keep, I/O, zoom and scroll work unchanged through the
+  session helpers. Each video's thumbnails fill its own part of the video track, and each join has a line down the
+  tracks and the next video's number and name on the ruler (the first video's name at the start). The Clips list adds
+  the video's name after a clip's name.
+- **Audio lanes** are per track number (A1, A2, …, as many as the video with the most tracks). The timeline draws each
+  video's track N on lane N at that video's volume and mute (`MixOf(video, stream)`), hatching a lane where a video has
+  no such track. The lane headers are the mix of the video under the playhead: they change as the playhead crosses a
+  join, and a track that video lacks is greyed out. "Even out all tracks" measures that video.
+- **Transcript tab**: the words in timeline order; paragraphs never run across a join
+  (`TranscriptLayout.Paragraphs(words, breaks)`), and each video's first paragraph has its name above it.
+
+### Next: export and Claude's video tools (part 3)
+
 - **Export and Claude (part 3)**: `ExportPlanner` cutting each `OutputPart` from its clip's own file (`plan.Source`
   per video, keyframes per video, `JoinTouching` only within one video), and joining videos with different codecs or
   sizes (re-encode, or refuse lossless with a reason); audio mapping per video. Claude's tools for adding, removing and
-  moving videos (`add_video`, `remove_video`, `move_video`, the command names) and the analyses per video, with times
-  on the timeline.
+  moving videos (`add_video`, `remove_video`, `move_video`, the command names). The analyses already cover every video
+  in timeline seconds.
 
 ## Media
 
@@ -177,7 +201,8 @@ exports the wrong file. On top of the model:
   peaks above −45 dBFS) and the volumes that bring the streams to the average of their levels, a boost never passing
   0 dBFS at the loudest peak. The editor's "Even out all tracks" uses it.
 
-In the App, `FfmpegMediaOpener` probes a file and creates a `MediaPreview`. Opening reads nothing else: the player
+In the App, `FfmpegMediaOpener` probes a file and creates a `MediaPreview`; a project with several videos has one for
+each, drawn together by `TimelinePreview` (see "Several videos in one project"). Opening reads nothing else: the player
 starts at once and every analysis runs only when something asks for it, in the background (or from the cache),
 raising `Changed` as results arrive; the timeline redraws, and keyframes are handed to the editing session for
 snapping. How long each part took, or that it came from the cache, is in Copy diagnostics ("Analysis keyframes 0.2 s
@@ -302,6 +327,17 @@ written. Claude's exports always add a number. "After export: Show in folder" re
   takes the output away, and mpv may end the file with an error), and the reopen goes by the file the app opened
   (`_openPath`), not `LoadedPath`, which that error clears.
 
+- **Several videos** play as one: `MpvTimeline.PathFor` gives mpv an `edl://` path of the files end to end, each
+  lasting exactly its video's duration (`start=0,length=…`, paths as `%bytes%path` so any character is read as it is),
+  so `time-pos`, `duration` and seeks are timeline seconds and the editor seeks as it does with one file. mpv's timeline
+  demuxer switches files itself; at a join it only reinitialises the decoders (one frame, about 17 ms, in the
+  integration test; a few tens of milliseconds when the codec changes). The audio tracks are laid out like the file
+  with the most of them (`layout=this`): `aidN` is track N of every file, and a file without it plays nothing there
+  (`lavfi-complex` keeps running). A different mix per video is applied when the playhead crosses into it
+  (`EditorViewModel.FollowLaneVideo`, which sends nothing when the mix stays the same, since a new filter graph makes a
+  short gap in the sound). Adding, removing or moving a video loads the new timeline where the playhead is, playing on
+  if it was. One video loads the file itself, as before.
+
 In the App, `IPlayer` is what `EditorViewModel` uses (`MpvPlaybackEngine` in the app, a fake in tests). The view
 model keeps the playhead: user moves become seeks, the player's positions come back as `Time` without seeking
 again. On `TimelineControl` a press moves the playhead to the time under the pointer anywhere on the ruler or the
@@ -371,7 +407,7 @@ Claude ──stdio──> HighlightCut.exe mcp (McpBridge) ──named pipe─�
 | --- | --- |
 | `get_project` | The videos (`sources`: id, file name, duration, timeline offset, audio tracks with volume and mute; `source` is the first), the timeline's length, playhead, selection and clips in output order with their timeline range and video |
 | `get_history` | Recent edits (user's and Claude's) with ids for `revert_action` |
-| `find_keyframes` | Keyframe times in a range (lossless cuts start on them); scans the video first if needed |
+| `find_keyframes` | Keyframe times in a range of the timeline, every video's (lossless cuts start on them); scans first if needed |
 | `find_silences` | Pauses at a minimum length and level (automatic by default), on all or some audio tracks; reads the audio first if needed |
 | `find_scene_changes` | Scene changes at a sensitivity; what is found so far while detection runs |
 | `cut_silences` | Cuts the pauses out of the included (or given) clips as one undo step, keeping some padding |
@@ -391,7 +427,8 @@ Results are JSON; times are seconds on the timeline (every video end to end, the
 seconds on it), rounded to milliseconds, with `MM:SS.mmm` ranges for talking to the user. Tools that take times map
 them onto the videos as the session does (`TimelineEdits`; `PartialTrimCommand`, `SplitAtCommand` and `AddRangeCommand`
 map when the edit is applied, so they work inside `edit_timeline`). The analyses (keyframes, silences, scenes, the
-transcript) are the open file's, the first video's, which starts the timeline at 0.
+transcript) cover every video, in timeline seconds (the editor's `TimelinePreview`); `find_silences`' track N is each
+video's Nth track, and a video without it is judged by the tracks it has.
 
 ## App
 
@@ -462,7 +499,7 @@ bind to view models and never change the project themselves.
 - **General**: at start `EditorViewModel.StartAsync` opens the file given on the command line, or else the newest
   recent file when "On startup" is "Open the last project". `RecentFilesStore` keeps 20 files and lists `Limit` of
   them (Recent files: 5, 10 or 20). The cache card measures `MediaCache.Measure` (one folder per video) off the UI
-  thread; Clear cache (`MediaCache.Clear`) keeps the open video's folder and every `transcript-*.json`.
+  thread; Clear cache (`MediaCache.Clear`) keeps the open project's videos' folders and every `transcript-*.json`.
 - **Settings file**: `AppSettings(Transcription, General?, Playback?, Export?, Keyboard?, Mcp?, Timeline?,
   WelcomeTourSeen, LastSeenVersion)` (records and enums in `Services/Settings/`), saved by `AppSettingsStore` to
   `%LOCALAPPDATA%\HighlightCut\settings.json` with source-generated camelCase JSON, enums by name
@@ -519,7 +556,8 @@ bind to view models and never change the project themselves.
   `DesignSettingsSample`) for a `DesignScreen`. `DemoScenario.Apply` does the common setup, then one partial hook per
   area (`ApplyTranscriptionMcp`, `ApplyTranscript`, `ApplyClaude`, `ApplyGeneralPlaybackExport`, `ApplyKeyboard`), then
   the welcome tour's and What's new's screens.
-  `DesignScreensTests` renders every screen to `artifacts/screenshots/<screen>.png`.
+  `DesignScreensTests` renders every screen to `artifacts/screenshots/<screen>.png`. `--demo several-videos`
+  (`ApplySeveralVideos`) is a keynote in three parts, the second with two audio tracks, with clips meeting at a join.
 
 ### Not wired up yet
 
@@ -584,6 +622,7 @@ and Whisper large-v3-turbo, small and base.en (99 languages; base.en English onl
 - **In the editor** (`MediaPreview`): transcription starts when asked for (the Transcript tab's Transcribe, or a
   Claude transcript tool), or when a file is opened with "Transcribe when a video is opened" on (off by default;
   saved as `transcribeWhenOpened`, so files from when it was on by default read as off), once a model is installed.
+  With several videos each file is transcribed and cached on its own, one after another in timeline order.
   The timeline's Transcript chip is the same setting: turned on, the open video is transcribed too; turned off, a
   transcription under way stops (`MediaPreview.StopTranscription`).
   A transcript cached earlier with the chosen model is shown when the file opens either way. It runs after

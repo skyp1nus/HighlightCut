@@ -18,6 +18,15 @@ public sealed partial class AudioLaneViewModel(int stream, int index, string key
     /// <summary>The video the stream belongs to (<see cref="SourceMedia.Id"/>), which the project's mix is keyed by too.</summary>
     public int SourceId { get; init; } = SourceMedia.FirstId;
 
+    /// <summary>The file name of that video when the project has several (the lanes then show the one under the playhead).</summary>
+    public string? VideoName { get; init; }
+
+    /// <summary>
+    /// The video has this track. With several videos a lane stands for a track number, and the video under the playhead
+    /// may have fewer tracks: its lane is greyed out then.
+    /// </summary>
+    public bool HasTrack { get; init; } = true;
+
     /// <summary>Muted in the preview. Muted lanes are drawn at 30 % opacity.</summary>
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(MuteTip))]
@@ -31,13 +40,16 @@ public sealed partial class AudioLaneViewModel(int stream, int index, string key
     [NotifyPropertyChangedFor(nameof(GainText), nameof(VolumeTip))]
     public partial double GainDb { get; set; }
 
-    public string MuteTip => IsMuted ? "Unmute" : "Mute";
+    public string MuteTip => !HasTrack ? $"{VideoName ?? "This video"} has no track {Key}" : IsMuted ? "Unmute" : "Mute";
+
+    /// <summary>"Mic", or "Mic · part-2.mp4" with several videos.</summary>
+    private string Named => VideoName is null ? Label : $"{Label} · {VideoName}";
 
     /// <summary>The volume next to the slider: "0", "+3", "−6.5", "−∞".</summary>
     public string GainText => FormatGain(GainDb);
 
     public string VolumeTip =>
-        $"{Label} volume: {(GainDb <= TrackMix.MinGainDb ? "silent" : GainText + " dB")}. Scroll to fine-tune, double-click to reset to 0 dB, "
+        $"{Named} volume: {(GainDb <= TrackMix.MinGainDb ? "silent" : GainText + " dB")}. Scroll to fine-tune, double-click to reset to 0 dB, "
         + "right-click to even out the tracks.";
 
     /// <summary>The editor's "Even out all tracks", offered in the lane's context menu.</summary>

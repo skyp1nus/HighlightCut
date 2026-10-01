@@ -9,6 +9,10 @@ starts with a short bold phrase. The same line goes into [CHANGELOG.uk.md](CHANG
 
 ## Unreleased
 
+### New
+
+- **Several videos in one project.** Add videos with Add video… in the project menu (Ctrl+Shift+A), the + at the end of the timeline or by dropping them onto the timeline. They sit end to end on one timeline, each join marked with the next video’s name, and play through as one. Reorder or remove them in the Videos list above the clips, and undo any of it. Keyframes, the waveform, silences, scenes and the transcript work across all of them, and each video keeps its own track volumes. Exporting several videos into one file comes in the next version.
+
 ### Improved
 
 - **Up-to-date video engine.** ffmpeg, which cuts and exports, moves to 9.0.2, and mpv, which plays the video, to its latest build, with their newest fixes.

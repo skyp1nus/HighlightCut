@@ -118,7 +118,7 @@ public sealed partial class SettingsViewModel
             Reveal(CacheFolder);
     }
 
-    /// <summary>Frees the cache but for the open video's analysis and every transcript, then measures it again.</summary>
+    /// <summary>Frees the cache but for the open videos' analysis and every transcript, then measures it again.</summary>
     [RelayCommand]
     private async Task ClearCache()
     {
@@ -130,7 +130,7 @@ public sealed partial class SettingsViewModel
         }
         CanClearCache = false;
         var cache = new MediaCache(CacheFolder);
-        string? open = _editor.HasFile ? _editor.Session.Project.Source?.Path : null;
+        List<string> open = _editor.HasFile ? [.. _editor.Session.Project.Sources.Select(s => s.Path)] : [];
         await Task.Run(() => cache.Clear(open)).ConfigureAwait(true);
         await MeasureCacheAsync().ConfigureAwait(true);
     }

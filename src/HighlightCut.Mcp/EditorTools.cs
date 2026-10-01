@@ -154,7 +154,8 @@ public sealed class EditorTools(IEditorHost host)
         included clip are not exported; excluded clips stay in the project but are not exported either.
 
         Start with get_project. Times are timeline seconds (decimals allowed); with one video they are seconds on
-        that video. Clip ids are stable; positions are 1-based output positions. Lossless export starts each clip
+        that video. find_keyframes, find_silences, find_scene_changes and the transcript tools cover every video and
+        give timeline seconds too. Clip ids are stable; positions are 1-based output positions. Lossless export starts each clip
         at the keyframe at or before its start; use find_keyframes when exact starts matter.
 
         You cannot see or hear the video, but find_silences shows where the speaker pauses (the first call reads the
@@ -212,7 +213,7 @@ public sealed class EditorTools(IEditorHost host)
         });
 
     [McpServerTool(Name = "find_keyframes", Title = "Find keyframes", ReadOnly = true, Idempotent = true)]
-    [Description("Keyframe times between two points of the source. A lossless export starts each clip at the keyframe at or " +
+    [Description("Keyframe times between two points of the timeline (every video's). A lossless export starts each clip at the keyframe at or " +
                  "before its start, so starting clips on keyframes avoids extra lead-in. The first call may take a moment " +
                  "while the video is scanned.")]
     public Task<IReadOnlyList<double>> FindKeyframes([Description("Seconds.")] double start, [Description("Seconds.")] double end,
@@ -253,7 +254,7 @@ public sealed class EditorTools(IEditorHost host)
     public Task<SilencesResult> FindSilences(
         [Description("Shortest pause, in seconds (default 1).")] double minDuration = 1.0,
         [Description("Peak level in dBFS that counts as silent, e.g. -40; automatic if omitted.")] double? thresholdDb = null,
-        [Description("Audio track numbers (as in get_project) that must be quiet; all if omitted.")] IReadOnlyList<int>? tracks = null,
+        [Description("Audio track numbers (as in get_project; track N of each video) that must be quiet; all if omitted.")] IReadOnlyList<int>? tracks = null,
         [Description("Only pauses that end after this time, in seconds.")] double? start = null,
         [Description("Only pauses that begin before this time, in seconds.")] double? end = null,
         CancellationToken cancellationToken = default) =>
@@ -835,7 +836,8 @@ public sealed class EditorTools(IEditorHost host)
             throw new McpException("minDuration must be between 0.05 and 3600 seconds.");
         if (thresholdDb is < -90 or > 0)
             throw new McpException("thresholdDb must be between -90 and 0 dBFS.");
-        int trackCount = ctx.Session.Project.Source?.AudioTracks.Length ?? 0;
+        // Track N is each video's Nth track; a video without it is judged by the tracks it has.
+        int trackCount = ctx.Session.Project.Sources.Select(s => s.AudioTracks.Length).DefaultIfEmpty(0).Max();
         if (tracks is not null && tracks.Any(t => t < 1 || t > trackCount))
             throw new McpException($"There is no audio track {tracks.First(t => t < 1 || t > trackCount)}; the tracks are 1–{trackCount}.");
         return ctx.FindSilences(minDuration, thresholdDb, tracks?.Select(t => t - 1).ToList()) ?? throw new McpException("This file has no audio.");

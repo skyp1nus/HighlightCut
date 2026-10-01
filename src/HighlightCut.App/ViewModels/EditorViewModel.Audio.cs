@@ -22,19 +22,42 @@ public sealed partial class EditorViewModel
     /// </summary>
     public TimeSpan VolumeApplyDelay { get; set; } = TimeSpan.FromMilliseconds(250);
 
-    /// <summary>One lane per audio stream of the project's video, with the mix the project has for it.</summary>
+    /// <summary>The video whose tracks the lanes' headers show: the one under the playhead.</summary>
+    private int _laneSourceId;
+
+    /// <summary>What the player was last told for each lane, kept for lanes the video under the playhead does not have.</summary>
+    private (bool[] Enabled, double[] Gains)? _appliedTracks;
+
+    /// <summary>
+    /// One lane per audio track number (A1, A2, …), as many as the video with the most tracks has. The timeline draws each
+    /// video's track N on lane N at that video's own volume; the headers (mute, volume) are those of the video under the
+    /// playhead, so each video keeps its own mix. A lane the video there does not have is greyed out.
+    /// </summary>
     private void CreateAudioLanes(Project project)
     {
         _volumeTimer?.Stop();
+        foreach (var old in AudioLanes)
+            old.PropertyChanged -= OnAudioLaneChanged;
         AudioLanes.Clear();
-        var tracks = project.Source?.AudioTracks ?? [];
-        int sourceId = project.Source?.Id ?? SourceMedia.FirstId;
-        for (int i = 0; i < tracks.Length; i++)
+        var source = project.SourceAt(Time) ?? project.Source;
+        int sourceId = source?.Id ?? SourceMedia.FirstId;
+        _laneSourceId = sourceId;
+        var tracks = source?.AudioTracks ?? [];
+        int count = project.Sources.IsEmpty ? 0 : project.Sources.Max(s => s.AudioTracks.Length);
+        string? video = project.Sources.Count > 1 ? source?.FileName : null;
+        for (int i = 0; i < count; i++)
         {
+            string key = "A" + (i + 1).ToString(CultureInfo.InvariantCulture);
+            if (i >= tracks.Length)
+            {
+                AudioLanes.Add(new AudioLaneViewModel(i, -1, key, key) { SourceId = sourceId, VideoName = video, HasTrack = false });
+                continue;
+            }
             var mix = project.MixOf(sourceId, tracks[i].Index);
-            var lane = new AudioLaneViewModel(i, tracks[i].Index, "A" + (i + 1).ToString(CultureInfo.InvariantCulture), tracks[i].Label)
+            var lane = new AudioLaneViewModel(i, tracks[i].Index, key, tracks[i].Label)
             {
                 SourceId = sourceId,
+                VideoName = video,
                 IsMuted = mix.IsMuted,
                 GainDb = mix.GainDb,
                 EvenOutCommand = EvenOutVolumesCommand,
@@ -43,6 +66,18 @@ public sealed partial class EditorViewModel
             AudioLanes.Add(lane);
         }
         EvenOutVolumesCommand.NotifyCanExecuteChanged();
+    }
+
+    /// <summary>The playhead moved into another video: the lanes' headers and the player's mix become that video's.</summary>
+    private void FollowLaneVideo()
+    {
+        var project = Session.Project;
+        if (project.Sources.Count < 2 || project.SourceAt(Time) is not { } source || source.Id == _laneSourceId)
+            return;
+        CreateAudioLanes(project);
+        ApplyAudioTracks(onlyIfChanged: true);
+        OnPropertyChanged(nameof(VideoAspect));
+        OnPropertyChanged(nameof(FrameRate));
     }
 
     private void OnAudioLaneChanged(object? sender, PropertyChangedEventArgs e)
@@ -70,7 +105,7 @@ public sealed partial class EditorViewModel
         _syncingLanes = true;
         try
         {
-            foreach (var lane in AudioLanes)
+            foreach (var lane in AudioLanes.Where(l => l.HasTrack))
             {
                 var mix = project.MixOf(lane.SourceId, lane.Index);
                 lane.IsMuted = mix.IsMuted;
@@ -84,11 +119,22 @@ public sealed partial class EditorViewModel
     }
 
     /// <summary>Muted lanes are left out of what the player plays; the others play at their volume.</summary>
-    private void ApplyAudioTracks()
+    /// <param name="onlyIfChanged">Sends nothing when the player already plays this mix (the playhead crossed a join).</param>
+    private void ApplyAudioTracks(bool onlyIfChanged = false)
     {
         _volumeTimer?.Stop();
-        if (HasPlayback)
-            _player!.SetAudioTracks([.. AudioLanes.Select(l => !l.IsMuted)], [.. AudioLanes.Select(l => l.GainDb)]);
+        if (!HasPlayback)
+            return;
+        // A lane the video under the playhead does not have plays nothing there; it keeps what it was set to, so the
+        // player's mix (and mpv's filter graph, which a change rebuilds with a gap in the sound) stays as it is.
+        int n = AudioLanes.Count;
+        var previous = _appliedTracks is { } p && p.Enabled.Length == n ? p : (Enumerable.Repeat(true, n).ToArray(), new double[n]);
+        bool[] enabled = [.. AudioLanes.Select((l, i) => l.HasTrack ? !l.IsMuted : previous.Item1[i])];
+        double[] gains = [.. AudioLanes.Select((l, i) => l.HasTrack ? l.GainDb : previous.Item2[i])];
+        if (onlyIfChanged && previous.Item1.SequenceEqual(enabled) && previous.Item2.SequenceEqual(gains) && _appliedTracks is not null)
+            return;
+        _appliedTracks = (enabled, gains);
+        _player!.SetAudioTracks(enabled, gains);
     }
 
     /// <summary>Applies the volumes after <see cref="VolumeApplyDelay"/>; changes meanwhile go with it.</summary>
@@ -106,7 +152,7 @@ public sealed partial class EditorViewModel
         _volumeTimer.Start();
     }
 
-    private bool CanEvenOutVolumes() => AudioLanes.Count(l => !l.IsMuted) >= 2;
+    private bool CanEvenOutVolumes() => AudioLanes.Count(l => l.HasTrack && !l.IsMuted) >= 2;
 
     /// <summary>
     /// Sets the volumes of the unmuted lanes so they sound about equally loud, from the audio's waveform
@@ -115,18 +161,20 @@ public sealed partial class EditorViewModel
     [RelayCommand(CanExecute = nameof(CanEvenOutVolumes))]
     private async Task EvenOutVolumesAsync()
     {
-        if (Media is not { } media)
+        // The lanes are the video's under the playhead, and so is the audio measured.
+        if ((PreviewOf(_laneSourceId) ?? Media) is not { } media)
             return;
+        var editing = Media;
         // Not read yet (no chip asked for it) or still being read.
         if (!media.WaveformRequested || !media.SilencesComplete)
         {
             ShowMessage("Reading the audio to measure how loud each track is…");
             await media.ReadWaveformAsync(CancellationToken.None).ConfigureAwait(true);
             // Another file opened meanwhile (its preview's read ends when it closes): nothing to even out here.
-            if (!ReferenceEquals(Media, media))
+            if (!ReferenceEquals(Media, editing))
                 return;
         }
-        var lanes = AudioLanes.Where(l => !l.IsMuted).ToList();
+        var lanes = AudioLanes.Where(l => l.HasTrack && !l.IsMuted).ToList();
         var levels = lanes.Select(l => media.MeasureAudio(l.Stream)).ToList();
         if (levels.Count(l => l is not null) < 2)
         {

@@ -147,8 +147,9 @@
                 <ItemsControl.ItemTemplate>
                   <DataTemplate x:DataType="vm:AudioLaneViewModel">
                     <!-- Mute, volume slider, volume in dB. -->
-                    <Grid Classes="lane" Classes.muted="{Binding IsMuted}" ColumnDefinitions="26,*,40" Height="20"
-                          VerticalAlignment="Center" Background="Transparent">
+                    <Grid Classes="lane" Classes.muted="{Binding IsMuted}" Classes.absent="{Binding !HasTrack}" ColumnDefinitions="26,*,40"
+                          Height="20" VerticalAlignment="Center" Background="Transparent" ToolTip.Tip="{Binding MuteTip}"
+                          ToolTip.ShowOnDisabled="True" IsEnabled="{Binding HasTrack}">
                       <Grid.ContextMenu>
                         <ContextMenu>
                           <MenuItem Header="Reset volume" Command="{Binding ResetVolumeCommand}" />
@@ -260,6 +261,10 @@
     <!-- A muted lane's volume is kept but not heard: dimmed like its waveform. -->
     <Style Selector="Grid.lane.muted Slider.gain, Grid.lane.muted TextBlock.gain">
       <Setter Property="Opacity" Value="0.3" />
+    </Style>
+    <!-- With several videos, a track number the video under the playhead does not have. -->
+    <Style Selector="Grid.lane.absent">
+      <Setter Property="Opacity" Value="0.35" />
     </Style>
   </UserControl.Styles>
 </UserControl>
