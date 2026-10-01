@@ -6,6 +6,9 @@
     <Project Path="src/HighlightCut.Media/HighlightCut.Media.csproj" />
     <Project Path="src/HighlightCut.Transcription/HighlightCut.Transcription.csproj" />
   </Folder>
+  <Folder Name="/scripts/">
+    <Project Path="scripts/memory/HighlightCut.MemoryBench.csproj" />
+  </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/HighlightCut.App.Tests/HighlightCut.App.Tests.csproj" />
     <Project Path="tests/HighlightCut.Core.Tests/HighlightCut.Core.Tests.csproj" />
