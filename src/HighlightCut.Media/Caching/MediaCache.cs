@@ -284,7 +284,9 @@ public sealed class MediaCache
         using var decoded = SKBitmap.Decode(jpg);
         if (decoded is null)
             return null;
-        using var atlas = decoded.ColorType == SKColorType.Bgra8888 ? decoded.Copy() : decoded.Copy(SKColorType.Bgra8888);
+        // Decoded as BGRA already on the usual platforms: no second copy of the whole atlas.
+        using var converted = decoded.ColorType == SKColorType.Bgra8888 ? null : decoded.Copy(SKColorType.Bgra8888);
+        var atlas = converted ?? decoded;
         var frames = new List<ThumbnailFrame>(index.Times.Length);
         for (int i = 0; i < index.Times.Length; i++)
         {

@@ -1,3 +1,4 @@
+using Avalonia;
 using Avalonia.Headless;
 using Avalonia.Headless.XUnit;
 using Avalonia.Media.Imaging;
@@ -279,6 +280,104 @@ public sealed class RealMediaTests : IDisposable
         Assert.Equal(["word1"], again.Media!.Transcript!.Words.Select(w => w.Text));
         Assert.Equal(1, FakeRecognizer.Pieces);
         w2.Close();
+    }
+
+    /// <summary>Remembers whether it was disposed; while <see cref="Hold"/> is reset, recognizing waits for it.</summary>
+    private sealed class TrackedRecognizer : ISpeechRecognizer
+    {
+        public static readonly ManualResetEventSlim Hold = new(true);
+        public static readonly ManualResetEventSlim Recognizing = new(false);
+        public volatile bool Disposed;
+
+        public IReadOnlyList<Word> Recognize(float[] samples, double offset)
+        {
+            Recognizing.Set();
+            Hold.Wait(TimeSpan.FromSeconds(30));
+            return [new Word("word", offset + 0.5, offset + 1)];
+        }
+
+        public void Dispose() => Disposed = true;
+    }
+
+    [AvaloniaFact]
+    public async Task The_model_is_let_go_when_a_transcription_ends_or_stops()
+    {
+        string video = await SampleAsync();
+        string models = FakeModels(ModelCatalog.Parakeet);
+        var made = new List<TrackedRecognizer>();
+        var (editor, window) = await OpenAsync(video, e =>
+        {
+            e.Settings.ModelsFolder = models;
+            e.RecognizerFactory = _ =>
+            {
+                var recognizer = new TrackedRecognizer();
+                lock (made)
+                    made.Add(recognizer);
+                return recognizer;
+            };
+        });
+        var media = editor.Media!;
+
+        // Stopped halfway (the Transcript chip turned off): the model goes once the piece it is on is done.
+        TrackedRecognizer.Hold.Reset();
+        TrackedRecognizer.Recognizing.Reset();
+        Assert.Null(editor.StartTranscription());
+        await PumpUntil(() => TrackedRecognizer.Recognizing.IsSet, 1200);
+        media.StopTranscription();
+        TrackedRecognizer.Hold.Set();
+        await PumpUntil(() => made[0].Disposed);
+
+        // Done: the model is not kept loaded until the next transcription, which loads it again.
+        Assert.Null(editor.StartTranscription());
+        await PumpUntil(() => media.TranscriptState == TranscriptState.Done, 1200);
+        Assert.Equal(2, made.Count);
+        await PumpUntil(() => made[1].Disposed);
+        window.Close();
+    }
+
+    [AvaloniaFact]
+    public async Task A_thumbnail_s_greyed_out_look_is_made_only_when_it_is_drawn()
+    {
+        string video = await SampleAsync();
+        var (editor, window) = await OpenAsync(video, e => (e.ShowFrames, e.ShowWaveform) = (true, false));
+        var preview = (MediaPreview)editor.Media!;
+        await preview.ThumbnailsTask.WaitAsync(TimeSpan.FromSeconds(60), Ct);
+        Assert.Equal(3, preview.ThumbnailCount);
+        // The timeline shows them in colour; no grey copies are kept for it.
+        AvaloniaHeadlessPlatform.ForceRenderTimerTick();
+        Dispatcher.UIThread.RunJobs();
+        Assert.Equal(0, preview.GreyThumbnailCount);
+
+        double colour = Saturation(Draw(FrameLook.Thumbnail));
+        double grey = Saturation(Draw(FrameLook.Excluded));
+        Assert.Equal(1, preview.GreyThumbnailCount);
+        Assert.InRange(grey, 0, colour / 3);
+        Draw(FrameLook.Excluded);
+        Assert.Equal(1, preview.GreyThumbnailCount);
+        window.Close();
+
+        byte[] Draw(FrameLook look)
+        {
+            using var target = new RenderTargetBitmap(new PixelSize(160, 90));
+            using (var context = target.CreateDrawingContext())
+                preview.DrawFrame(context, new Rect(0, 0, 160, 90), 1, look, 0);
+            var pixels = new byte[160 * 90 * 4];
+            var handle = System.Runtime.InteropServices.GCHandle.Alloc(pixels, System.Runtime.InteropServices.GCHandleType.Pinned);
+            try
+            {
+                target.CopyPixels(new PixelRect(0, 0, 160, 90), handle.AddrOfPinnedObject(), pixels.Length, 160 * 4);
+            }
+            finally
+            {
+                handle.Free();
+            }
+            return pixels;
+        }
+
+        // How far the colours are from grey, on average.
+        static double Saturation(byte[] bgra) =>
+            Enumerable.Range(0, bgra.Length / 4).Average(i => Math.Max(bgra[4 * i], Math.Max(bgra[4 * i + 1], bgra[4 * i + 2]))
+                                                             - Math.Min(bgra[4 * i], Math.Min(bgra[4 * i + 1], bgra[4 * i + 2])));
     }
 
     [AvaloniaFact]
