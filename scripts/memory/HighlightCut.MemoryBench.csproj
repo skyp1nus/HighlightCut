@@ -1,15 +1,13 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <!--
     Measures the app's memory through a realistic session: see README.md. Not part of the app; it hosts the real editor,
-    player and analyses headlessly, with the App's runtime settings (HighlightCut.Runtime.props).
+    player and analyses headlessly. It has the App's runtime settings (the defaults); keep them the same.
   -->
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <RootNamespace>HighlightCut.MemoryBench</RootNamespace>
     <IsPackable>false</IsPackable>
   </PropertyGroup>
-  <!-- Missing in versions from before it (compare.ps1 measures those too). -->
-  <Import Project="..\..\build\HighlightCut.Runtime.props" Condition="Exists('..\..\build\HighlightCut.Runtime.props')" />
   <ItemGroup>
     <ProjectReference Include="..\..\src\HighlightCut.App\HighlightCut.App.csproj" />
   </ItemGroup>

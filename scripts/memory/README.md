@@ -2,8 +2,8 @@
 
 `HighlightCut.MemoryBench` runs a realistic editing session in the real editor and measures the process after each
 step. The editor, the player (libmpv), the analyses (ffmpeg) and transcription (sherpa-onnx) are the app's own; only the
-window is headless (Avalonia.Headless with Skia, redrawn 60 times a second), so it runs anywhere, CI included. It uses
-the App's runtime settings (`build/HighlightCut.Runtime.props`).
+window is headless (Avalonia.Headless with Skia, redrawn 60 times a second), so it runs anywhere, CI included. Its
+runtime settings are the App's (the .NET defaults); a setting added to the App goes into its project file too.
 
 The session:
 
@@ -39,7 +39,8 @@ writes `artifacts/memory/before.md` and `after.md`. On GitHub, Actions → CI �
 on Windows with a 30-minute video.
 
 Runtime settings can be tried without rebuilding through environment variables, which the report lists:
-`DOTNET_GCConserveMemory=5`, `DOTNET_gcConcurrent=0`, `DOTNET_TieredPGO=0`, `DOTNET_GCgen0size=0x400000`…
+`DOTNET_GCConserveMemory=5`, `DOTNET_gcConcurrent=0`, `DOTNET_TieredPGO=0`, `DOTNET_GCgen0size=0x400000`… None of
+those helped measurably (October 2026, 90-minute video): the managed heap stays under 50 MB, and the rest is native.
 
 ## Reading the report
 
