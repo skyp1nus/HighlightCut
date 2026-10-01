@@ -56,11 +56,18 @@ public static class MediaProbe
                     case "video" when video is null && !IsAttachedPicture(s):
                         var (fps, fpsText) = FrameRate(s);
                         video = new VideoStreamInfo(index, codec, Int(s, "width") ?? 0, Int(s, "height") ?? 0, fps, fpsText,
-                            (Int(s, "has_b_frames") ?? 0) > 0, Text(s, "pix_fmt"), Rotation(s));
+                            (Int(s, "has_b_frames") ?? 0) > 0, Text(s, "pix_fmt"), Rotation(s))
+                        {
+                            FrameRateRational = RateText(s),
+                            TimeBase = Text(s, "time_base"),
+                        };
                         break;
                     case "audio":
                         audio.Add(new AudioStreamInfo(index, audio.Count, codec, Int(s, "channels") ?? 0,
-                            (int)(Number(s, "sample_rate") ?? 0), TrackTitle(s), Tag(s, "language")));
+                            (int)(Number(s, "sample_rate") ?? 0), TrackTitle(s), Tag(s, "language"))
+                        {
+                            ChannelLayout = Text(s, "channel_layout"),
+                        });
                         break;
                     case "subtitle":
                         subtitles.Add(new SubtitleStreamInfo(index, codec, Tag(s, "language")));
@@ -93,6 +100,18 @@ public static class MediaProbe
             return (0, "?");
         double rounded = Math.Round(fps, 2);
         return (fps, rounded.ToString(rounded == Math.Floor(rounded) ? "0" : "0.##", CultureInfo.InvariantCulture));
+    }
+
+    /// <summary>The rate <see cref="FrameRate"/> reads, as ffprobe wrote it ("30000/1001"); null when it has none.</summary>
+    internal static string? RateText(JsonElement stream)
+    {
+        string? average = Text(stream, "avg_frame_rate");
+        double fps = Rational(average);
+        if (fps > 0 && fps <= 1000)
+            return average;
+        string? real = Text(stream, "r_frame_rate");
+        fps = Rational(real);
+        return fps > 0 && fps <= 1000 ? real : null;
     }
 
     internal static double Rational(string? text)
