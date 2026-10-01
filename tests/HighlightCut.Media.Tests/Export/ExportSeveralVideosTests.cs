@@ -217,14 +217,15 @@ public class ExportSeveralVideosTests
         var layout = plan.Layout!;
         Assert.Equal((1920, 1080, "30"), (layout.Width, layout.Height, layout.FrameRate));
         Assert.Equal([(0, 48000, 2), (1, 48000, 2)], layout.Lanes.Select(l => (l.Position, l.SampleRate, l.Channels)));
-        string fit = "scale=1920:1080:force_original_aspect_ratio=decrease:force_divisible_by=2,pad=1920:1080:(ow-iw)/2:(oh-ih)/2:black,setsar=1," +
+        string fit = "setpts=PTS-STARTPTS,scale=1920:1080:force_original_aspect_ratio=decrease:force_divisible_by=2,pad=1920:1080:(ow-iw)/2:(oh-ih)/2:black,setsar=1," +
                      "fps=30,format=yuv420p";
-        string stereo = "aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo";
+        string resample = "aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo";
+        string stereo = "asetpts=PTS-STARTPTS," + resample;
         Assert.Equal(
             "-ss 1.500000 -t 1.700000 -i \"{in}/My clip's.mp4\" -ss 2.000000 -t 2.000000 -i \"{in}/other.mp4\" " +
             "-f ffmetadata -i \"{out}/.highlightcut-tmp-t1.ffmeta\" " +
             $"-filter_complex \"[0:v:0]{fit}[v0];[0:a:0]{stereo}[a0x0];[0:a:1]{stereo}[a0x1];" +
-            $"[1:v:0]{fit}[v1];[1:a:0]volume=-6dB,{stereo}[a1x0];anullsrc=r=48000:cl=stereo,atrim=duration=2.000000[a1x1];" +
+            $"[1:v:0]{fit}[v1];[1:a:0]asetpts=PTS-STARTPTS,volume=-6dB,{resample}[a1x0];anullsrc=r=48000:cl=stereo,atrim=duration=2.000000[a1x1];" +
             "[v0][a0x0][a0x1][v1][a1x0][a1x1]concat=n=2:v=1:a=2[v][a0][a1]\" " +
             "-map \"[v]\" -map \"[a0]\" -map \"[a1]\" -c:v libx264 -preset medium -crf 18 -c:a aac -b:a 192k -map_chapters 2 " +
             "-map_metadata 0 -movflags +faststart -f mp4 \"{out}/demo-cut.mp4\" -y",
@@ -255,8 +256,8 @@ public class ExportSeveralVideosTests
         var plan = PlanOf(Mixed(Part2), settings);
 
         Assert.Equal([0, 1], plan.Layout!.Lanes.Select(l => l.Position));
-        Assert.Contains("[0:a:1]volume=0,aresample", Args(plan, 0), StringComparison.Ordinal);
-        Assert.Contains("[1:a:1]aresample", Args(plan, 0), StringComparison.Ordinal);
+        Assert.Contains("[0:a:1]asetpts=PTS-STARTPTS,volume=0,aresample", Args(plan, 0), StringComparison.Ordinal);
+        Assert.Contains("[1:a:1]asetpts=PTS-STARTPTS,aresample", Args(plan, 0), StringComparison.Ordinal);
     }
 
     [Fact]

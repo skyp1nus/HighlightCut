@@ -226,8 +226,9 @@ public static class FfmpegCommands
 
     /// <summary>
     /// The filter graph of <see cref="EncodeJoined"/>: each input brought to the layout, then the concat filter, e.g.
-    /// <c>[0:v:0]scale=…,pad=…,setsar=1,fps=30,format=yuv420p[v0];[0:a:0]volume=-6dB,aresample=48000,aformat=…[a0x0];…</c>
-    /// <c>[v0][a0x0][v1][a1x0]concat=n=2:v=1:a=1[v][a0]</c>.
+    /// <c>[0:v:0]setpts=PTS-STARTPTS,scale=…,pad=…,setsar=1,fps=30,format=yuv420p[v0];[0:a:0]asetpts=PTS-STARTPTS,volume=-6dB,aresample=48000,aformat=…[a0x0];…</c>.
+    /// Each input starts at 0: after a seek its first frame can be a little later, and <c>fps</c> would then start a frame
+    /// late and leave a gap at the join. Then <c>[v0][a0x0][v1][a1x0]concat=n=2:v=1:a=1[v][a0]</c>.
     /// </summary>
     /// <param name="inputs">Per input (clip): its video, what it plays on each output track, and its length in seconds.</param>
     public static string JoinFilter(ExportLayout layout, IReadOnlyList<(MediaInfo Info, IReadOnlyList<LaneInput> Lanes, double Duration)> inputs)
@@ -242,7 +243,7 @@ public static class FfmpegCommands
             if (layout.Video is not null)
             {
                 sb.Append(info.Video is not null
-                    ? $"[{i}:v:0]scale={w}:{h}:force_original_aspect_ratio=decrease:force_divisible_by=2,pad={w}:{h}:(ow-iw)/2:(oh-ih)/2:black,setsar=1,"
+                    ? $"[{i}:v:0]setpts=PTS-STARTPTS,scale={w}:{h}:force_original_aspect_ratio=decrease:force_divisible_by=2,pad={w}:{h}:(ow-iw)/2:(oh-ih)/2:black,setsar=1,"
                     : $"color=c=black:s={w}x{h}:r={layout.FrameRate},trim=duration={d},");
                 sb.Append(ci, $"fps={layout.FrameRate},format=yuv420p[v{i}];");
             }
@@ -251,7 +252,7 @@ public static class FfmpegCommands
                 var lane = layout.Lanes[k];
                 string format = $"aresample={lane.SampleRate.ToString(ci)},aformat=sample_fmts=fltp:channel_layouts={lane.Layout}";
                 sb.Append(lanes[k].Stream is { } stream
-                    ? $"[{i}:a:{stream.Position.ToString(ci)}]" + (lanes[k].GainDb != 0 ? FfmpegText.VolumeFilter(lanes[k].GainDb) + "," : "") + format
+                    ? $"[{i}:a:{stream.Position.ToString(ci)}]asetpts=PTS-STARTPTS," + (lanes[k].GainDb != 0 ? FfmpegText.VolumeFilter(lanes[k].GainDb) + "," : "") + format
                     : $"anullsrc=r={lane.SampleRate.ToString(ci)}:cl={lane.Layout},atrim=duration={d}");
                 sb.Append(ci, $"[a{i}x{k}];");
             }

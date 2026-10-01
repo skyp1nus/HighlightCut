@@ -189,7 +189,8 @@ its own preview (`EditorViewModel.PreviewOf(id).ReadKeyframesAsync`) and says "F
   videos is re-encoded (AAC 192 kb/s) in every piece at that video's volume and copied when joined. Subtitles are not
   joined across videos. Separate files are cut from each video as they are, so they are always lossless.
 - **Re-encoded** (`FfmpegCommands.EncodeJoined`, `JoinFilter`): one ffmpeg pass as with one video, each clip its own
-  seeked input from its video, brought to the layout before the concat filter: `scale` to fit inside the first video's
+  seeked input from its video, brought to the layout before the concat filter: timestamps from 0 (`setpts`, so `fps`
+  never starts a frame late after a seek and leaves a gap at the join), `scale` to fit inside the first video's
   size without stretching (`force_original_aspect_ratio=decrease`), `pad` with black, `setsar=1`, `fps` (constant
   frame rate) and `format=yuv420p`; each track through its video's `volume`, `aresample` to the output track's sample
   rate and `aformat` to its channel layout; `anullsrc` (trimmed to the clip) where a video has no such track, and a
