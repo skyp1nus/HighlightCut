@@ -61,6 +61,12 @@ public sealed partial class ClaudeFileRequestViewModel : ViewModelBase, IClaudeR
             _editor.HasFile ? $"{path} · closes {_editor.ProjectName}" : path,
             () => _editor.Settings.OpenFilesPermission = McpPermission.Allow, cancellationToken);
 
+    /// <summary>Asks to add the video at <paramref name="path"/> to the end of the timeline. True when allowed.</summary>
+    public Task<bool> AskToAddAsync(string path, CancellationToken cancellationToken = default) =>
+        AskAsync($"Claude wants to add {Path.GetFileName(path)}",
+            $"{path} · at the end of the timeline, after {_editor.Session.Project.Sources.LastOrDefault()?.FileName ?? _editor.ProjectName}",
+            () => _editor.Settings.OpenFilesPermission = McpPermission.Allow, cancellationToken);
+
     /// <summary>Asks to save the project to <paramref name="path"/>. True when allowed.</summary>
     public Task<bool> AskToSaveAsync(string path, CancellationToken cancellationToken = default) =>
         AskAsync($"Claude wants to save {_editor.ProjectName}",

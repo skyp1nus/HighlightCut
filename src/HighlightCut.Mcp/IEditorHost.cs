@@ -98,6 +98,13 @@ public interface IEditorContext
     Task<string?> OpenAsync(string path, CancellationToken cancellationToken);
 
     /// <summary>
+    /// Probes a video and appends it at the end of the timeline as an edit of Claude's (one undo step), like the editor's
+    /// Add video…: the timeline, the player and the audio lanes follow. May first wait for the user to allow it (the same
+    /// permission as opening files). Returns why it failed or why the user declined, or null.
+    /// </summary>
+    Task<string?> AddVideoAsync(string path, CancellationToken cancellationToken);
+
+    /// <summary>
     /// Saves the project (to <paramref name="path"/> if given). May first wait for the user to allow it. Returns why
     /// it failed or why the user declined, or null.
     /// </summary>

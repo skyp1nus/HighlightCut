@@ -173,6 +173,23 @@ internal sealed class FakeEditor : IEditorHost, IEditorContext, IDisposable
         return Task.FromResult<string?>(null);
     }
 
+    public List<string> Added { get; } = [];
+
+    /// <summary>Why adding a video is refused (the user declined, say); null: it is added, 120 s with one audio track.</summary>
+    public string? AddRefusal { get; set; }
+
+    public Task<string?> AddVideoAsync(string path, CancellationToken cancellationToken)
+    {
+        Added.Add(path);
+        if (AddRefusal is { } refusal)
+            return Task.FromResult<string?>(refusal);
+        if (path.EndsWith(".broken", StringComparison.Ordinal))
+            return Task.FromResult<string?>($"Could not open {Path.GetFileName(path)}: ffprobe could not read the file.");
+        Session.Execute(new HighlightCut.Core.Editing.Commands.AddSourceCommand(new SourceMedia(path, 120, 25, [new AudioTrack(1, "Room")])),
+            EditOrigin.Assistant);
+        return Task.FromResult<string?>(null);
+    }
+
     public Task<string?> SaveAsync(string? path, CancellationToken cancellationToken)
     {
         ProjectPath = path ?? ProjectPath;
@@ -240,10 +257,11 @@ public class McpToolListTests
 {
     private static readonly string[] Expected =
     [
-        "add_segment", "cancel_export", "cut_filler_words", "cut_ranges", "cut_silences", "edit_timeline", "export",
+        "add_segment", "add_video", "cancel_export", "cut_filler_words", "cut_ranges", "cut_silences", "edit_timeline", "export",
         "find_filler_words", "find_keyframes", "find_scene_changes", "find_silences", "get_export_status", "get_history", "get_project",
-        "get_transcript", "join_segments", "list_videos", "move_segment", "open_file", "redo", "remove_segment", "revert_action", "save_project",
-        "search_transcript", "seek", "set_color", "set_included", "set_label", "set_playing", "split_segment", "trim_segment", "undo",
+        "get_transcript", "join_segments", "list_videos", "move_segment", "move_video", "open_file", "redo", "remove_segment", "remove_video",
+        "revert_action", "save_project", "search_transcript", "seek", "set_color", "set_included", "set_label", "set_playing", "split_segment",
+        "trim_segment", "undo",
     ];
 
     [Fact]
@@ -257,6 +275,7 @@ public class McpToolListTests
         Assert.True(getProject.Annotations?.ReadOnlyHint);
         var remove = tools.Single(t => t.Name == "remove_segment").ProtocolTool;
         Assert.True(remove.Annotations?.DestructiveHint);
+        Assert.True(tools.Single(t => t.Name == "remove_video").ProtocolTool.Annotations?.DestructiveHint);
         var add = tools.Single(t => t.Name == "add_segment").ProtocolTool;
         Assert.Equal(["end", "start"], add.InputSchema.GetProperty("required").EnumerateArray().Select(e => e.GetString()).Order());
         Assert.Contains("HighlightCut", c.Client.ServerInstructions, StringComparison.Ordinal);

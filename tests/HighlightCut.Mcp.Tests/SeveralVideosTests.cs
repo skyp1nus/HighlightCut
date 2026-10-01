@@ -1,3 +1,4 @@
+using HighlightCut.Core.Editing;
 using HighlightCut.Core.Model;
 
 namespace HighlightCut.Mcp.Tests;
@@ -162,5 +163,142 @@ public class McpSeveralVideosTests
         Assert.Equal("keynote.mp4 · 1080p · 30 fps", source.GetProperty("summary").GetString());
         var clip = p.GetProperty("clips")[1];
         Assert.Equal((100, 200, 1), (clip.GetProperty("start").GetDouble(), clip.GetProperty("end").GetDouble(), clip.GetProperty("source").GetInt32()));
+    }
+
+    // ---- add_video, remove_video, move_video ---------------------------------------------
+
+    [Fact]
+    public async Task Add_video_appends_a_video_as_one_undoable_edit()
+    {
+        string dir = Directory.CreateTempSubdirectory("highlightcut-mcp").FullName;
+        try
+        {
+            string video = Path.Combine(dir, "outro.mp4");
+            await File.WriteAllTextAsync(video, "", TestContext.Current.CancellationToken);
+            var editor = TwoClips();
+            await using var c = await Connection.OpenAsync(editor);
+
+            var r = (await c.Client.Call("add_video", new { path = video })).Json();
+
+            Assert.Equal([video], editor.Added);
+            Assert.Equal(["keynote.mp4", "qa.mp4", "outro.mp4"], editor.Session.Project.Sources.Select(s => s.FileName));
+            Assert.Equal("Added video 3 (outro.mp4)", r.GetProperty("result").GetString());
+            var sources = r.GetProperty("sources").EnumerateArray().ToList();
+            Assert.Equal((3, 900.0), (sources[2].GetProperty("id").GetInt32(), sources[2].GetProperty("offset").GetDouble()));
+            Assert.Equal(1020, r.GetProperty("timelineDuration").GetDouble());
+            var entry = Assert.Single(editor.Session.History.Entries);
+            Assert.Equal(r.GetProperty("action").GetInt64(), entry.Id);
+            Assert.Equal(EditOrigin.Assistant, entry.Origin);
+            // The clips stay; the new video's are cut from 900 s on.
+            Assert.Equal(2, r.GetProperty("clips").GetArrayLength());
+            (await c.Client.Call("add_segment", new { start = 910, end = 920 })).Json();
+            Assert.Equal((3, 10.0, 20.0), editor.Session.Project.Clips.Select(x => (x.SourceId, x.Start, x.End)).Last());
+
+            (await c.Client.Call("undo")).Json();
+            (await c.Client.Call("undo")).Json();
+            Assert.Equal(2, editor.Session.Project.Sources.Count);
+        }
+        finally
+        {
+            Directory.Delete(dir, true);
+        }
+    }
+
+    [Fact]
+    public async Task Add_video_reports_why_a_video_was_not_added()
+    {
+        string dir = Directory.CreateTempSubdirectory("highlightcut-mcp").FullName;
+        try
+        {
+            string broken = Path.Combine(dir, "bad.broken"), video = Path.Combine(dir, "outro.mp4");
+            await File.WriteAllTextAsync(broken, "", TestContext.Current.CancellationToken);
+            await File.WriteAllTextAsync(video, "", TestContext.Current.CancellationToken);
+            var editor = TwoClips();
+            await using var c = await Connection.OpenAsync(editor);
+
+            var failed = await c.Client.Call("add_video", new { path = broken });
+            Assert.True(failed.IsError);
+            Assert.Contains("Could not open bad.broken", failed.Text(), StringComparison.Ordinal);
+            Assert.Contains("does not exist", (await c.Client.Call("add_video", new { path = Path.Combine(dir, "missing.mp4") })).Text(),
+                StringComparison.Ordinal);
+            Assert.Contains("full path", (await c.Client.Call("add_video", new { path = "outro.mp4" })).Text(), StringComparison.Ordinal);
+            editor.AddRefusal = "The user declined adding outro.mp4.";
+            Assert.Contains("The user declined adding outro.mp4.", (await c.Client.Call("add_video", new { path = video })).Text(), StringComparison.Ordinal);
+            Assert.Equal(2, editor.Session.Project.Sources.Count);
+            Assert.Empty(editor.Session.History.Entries);
+        }
+        finally
+        {
+            Directory.Delete(dir, true);
+        }
+    }
+
+    [Fact]
+    public async Task Add_video_needs_an_open_project()
+    {
+        await using var c = await Connection.OpenAsync(new FakeEditor(withFile: false));
+
+        var r = await c.Client.Call("add_video", new { path = Path.GetFullPath("outro.mp4") });
+
+        Assert.True(r.IsError);
+        Assert.Contains("open_file", r.Text(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Remove_video_takes_its_clips_with_it_and_says_how_many()
+    {
+        var editor = Editor(new Clip(1, "Intro", 10, 40), new Clip(2, "Question", 20, 50, SourceId: 2), new Clip(3, "Answer", 60, 90, SourceId: 2));
+        await using var c = await Connection.OpenAsync(editor);
+
+        var r = (await c.Client.Call("remove_video", new { video = 2 })).Json();
+
+        Assert.Equal("Removed video 2 (qa.mp4) and its 2 clips", r.GetProperty("result").GetString());
+        Assert.Equal([1], r.GetProperty("sources").EnumerateArray().Select(s => s.GetProperty("id").GetInt32()));
+        Assert.Equal([1], editor.Session.Project.Clips.Select(x => x.Id));
+        Assert.Equal(600, r.GetProperty("timelineDuration").GetDouble());
+
+        (await c.Client.Call("undo")).Json();
+        Assert.Equal(3, editor.Session.Project.Clips.Count);
+
+        var missing = await c.Client.Call("remove_video", new { video = 7 });
+        Assert.True(missing.IsError);
+        Assert.Contains("There is no video 7; the videos are 1 (keynote.mp4), 2 (qa.mp4).", missing.Text(), StringComparison.Ordinal);
+        (await c.Client.Call("remove_video", new { video = 2 })).Json();
+        var only = await c.Client.Call("remove_video", new { video = 1 });
+        Assert.True(only.IsError);
+        Assert.Contains("only video", only.Text(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Move_video_reorders_the_timeline_and_its_clips_go_along()
+    {
+        var editor = TwoClips();
+        await using var c = await Connection.OpenAsync(editor);
+
+        var r = (await c.Client.Call("move_video", new { video = 2, position = 1 })).Json();
+
+        Assert.Equal("Moved video 2 to position 1", r.GetProperty("result").GetString());
+        Assert.Equal([2, 1], editor.Session.Project.Sources.Select(s => s.Id));
+        var sources = r.GetProperty("sources").EnumerateArray().ToList();
+        Assert.Equal([0, 300], sources.Select(s => s.GetProperty("offset").GetDouble()));
+        // The output order stays; the clips' timeline ranges follow their videos.
+        var clips = r.GetProperty("clips").EnumerateArray().ToList();
+        Assert.Equal([1, 2], clips.Select(x => x.GetProperty("id").GetInt32()));
+        Assert.Equal([310, 20], clips.Select(x => x.GetProperty("start").GetDouble()));
+        Assert.Equal(EditOrigin.Assistant, Assert.Single(editor.Session.History.Entries).Origin);
+
+        var outside = await c.Client.Call("move_video", new { video = 1, position = 3 });
+        Assert.True(outside.IsError);
+        Assert.Contains("Position 3 is outside the video list (1–2).", outside.Text(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task The_instructions_tell_Claude_about_the_video_tools()
+    {
+        await using var c = await Connection.OpenAsync(Editor());
+
+        Assert.Contains("add_video", c.Client.ServerInstructions, StringComparison.Ordinal);
+        Assert.Contains("remove_video", c.Client.ServerInstructions, StringComparison.Ordinal);
+        Assert.Contains("move_video", c.Client.ServerInstructions, StringComparison.Ordinal);
     }
 }
