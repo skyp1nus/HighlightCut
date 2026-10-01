@@ -46,9 +46,9 @@ The session is not thread-safe. The MCP server runs every tool call on the UI th
 | `BatchCommand` | any | Several commands as one undo step |
 | `RevertEditCommand` | `revert_action` | Reverts one earlier edit and keeps the edits made after it |
 | `CutRangesCommand` | `cut_silences`, `cut_ranges`, `cut_filler_words` | Cuts ranges of the videos out of the clips they touch, splitting them |
-| `AddSourceCommand` | `add_video` (no tool yet) | Adds a video at the end of the timeline, with the next free id |
-| `RemoveSourceCommand` | `remove_video` (no tool yet) | Removes a video and every clip cut from it; refused for the only video |
-| `MoveSourceCommand` | `move_video` (no tool yet) | Moves a video to another place on the timeline; its clips move with it |
+| `AddSourceCommand` | `add_video` | Adds a video at the end of the timeline, with the next free id |
+| `RemoveSourceCommand` | `remove_video` | Removes a video and every clip cut from it; refused for the only video |
+| `MoveSourceCommand` | `move_video` | Moves a video to another place on the timeline; its clips move with it |
 
 Commands take seconds on one video. `EditorSession` wraps them with UI-friendly helpers that take timeline seconds,
 the times the user sees (`Trim` clamps and snaps, `KeepRange` inserts by timeline position, `AddClip` and `KeepRange`
@@ -129,9 +129,9 @@ project the app makes today and every file saved before, works exactly as before
 
 ### In the app
 
-The app opens, edits, plays and saves projects with several videos (part 2); only the export waits for part 3
-(`ExportPlanner` still refuses a project with several, with a reason). A project with one video looks and behaves as
-before: its preview is the file's own and the player loads the file.
+The app opens, edits, plays, saves and exports projects with several videos, and Claude adds, removes and moves them. A
+project with one video looks and behaves as before: its preview is the file's own, the player loads the file, and its
+export plan is the same, command for command.
 
 - **Opening**: a project file's videos are probed one by one (`Project.WithSource` keeps each id); one that is missing
   stops the open with the same message as a missing source ("part2.mp4 was not found…").
@@ -162,13 +162,40 @@ before: its preview is the file's own and the player loads the file.
 - **Transcript tab**: the words in timeline order; paragraphs never run across a join
   (`TranscriptLayout.Paragraphs(words, breaks)`), and each video's first paragraph has its name above it.
 
-### Next: export and Claude's video tools (part 3)
+### Exporting several videos
 
-- **Export and Claude (part 3)**: `ExportPlanner` cutting each `OutputPart` from its clip's own file (`plan.Source`
-  per video, keyframes per video, `JoinTouching` only within one video), and joining videos with different codecs or
-  sizes (re-encode, or refuse lossless with a reason); audio mapping per video. Claude's tools for adding, removing and
-  moving videos (`add_video`, `remove_video`, `move_video`, the command names). The analyses already cover every video
-  in timeline seconds.
+`ExportPlanner.Plan(project, sources, settings)` takes an `ExportSource` (the `MediaInfo` and the keyframes, in seconds
+on that file) for every video an included clip comes from. Each `ExportClip` keeps its `SourceId` and is cut from its
+own file with its own keyframes (`CutPlanner` per video; `ExportPlan.InfoOf(clip)`), and each video's audio choices are
+its own (`ExportSettings.SourceAudio`, by video id; `ForSource(id)` gives the settings for cutting from it).
+`JoinTouching` joins clips only within one video: clips meeting at the join between two videos are two cuts. When the
+clips come from one video (a project with one, or a project whose other videos have no included clips) the plan is
+the one-video plan of that video: `Videos` and `Layout` are null. The export dialog reads each video's keyframes from
+its own preview (`EditorViewModel.PreviewOf(id).ReadKeyframesAsync`) and says "Finding keyframes" until all are there.
+
+- **One file from several videos** (`ExportLayout`): the picture of the first video the clips come from (its size as
+  displayed, made even, and its frame rate) and the audio tracks: output track N is track N of every video, the most
+  any video has (with "Only unmuted lanes", the tracks unmuted in at least one video). Each video plays its track N at
+  its own volume (`MixOf(video, stream)`), silent where it has no track N or, with "Only unmuted lanes", where the
+  track is muted in that video.
+- **Lossless** (`ExportLayout.LosslessProblem`, `ExportPlanner.LosslessMergeProblem`): stream copy joins videos only
+  when they have the same video codec, size, rotation, frame rate, pixel format and (when nothing else differs) time
+  base, and the same audio tracks (codec, sample rate, channels). Otherwise the plan is refused with the videos that
+  differ and how ("next to part1.mp4, part2.mp4 has 1280×720 instead of 1920×1080 and 25 fps instead of 30"); the
+  Export dialog shows it under the modes before anything runs, offers "Re-encode instead" and keeps Export disabled, and
+  Claude's `export` is told before the user is asked. Each piece maps the picture and the video's track for each output
+  track (`FfmpegCommands.JoinedCut`), so the concat demuxer gets the same streams from every piece. A track every video
+  plays at the same volume gets it once, in the concat step, as with one video; a track whose volume differs between
+  videos is re-encoded (AAC 192 kb/s) in every piece at that video's volume and copied when joined. Subtitles are not
+  joined across videos. Separate files are cut from each video as they are, so they are always lossless.
+- **Re-encoded** (`FfmpegCommands.EncodeJoined`, `JoinFilter`): one ffmpeg pass as with one video, each clip its own
+  seeked input from its video, brought to the layout before the concat filter: timestamps from 0 (`setpts`, so `fps`
+  never starts a frame late after a seek and leaves a gap at the join), `scale` to fit inside the first video's
+  size without stretching (`force_original_aspect_ratio=decrease`), `pad` with black, `setsar=1`, `fps` (constant
+  frame rate) and `format=yuv420p`; each track through its video's `volume`, `aresample` to the output track's sample
+  rate and `aformat` to its channel layout; `anullsrc` (trimmed to the clip) where a video has no such track, and a
+  black `color` source for a video without a picture. The GPU encoder is used as for one video. Separate re-encoded
+  files keep each video's own picture.
 
 ## Media
 
@@ -196,7 +223,8 @@ before: its preview is the file's own and the player loads the file.
   `%LOCALAPPDATA%\HighlightCut\cache`, keyed by path, size and modification time.
 - **Export**: `ExportPlanner` turns the project and `ExportSettings` into an `ExportPlan` (every step, output
   and temporary file decided up front, so it can be tested and shown); `FfmpegCommands` builds each step's
-  ffmpeg command with FFMpegCore; `ExportRunner` runs the steps with progress and cancellation.
+  ffmpeg command with FFMpegCore; `ExportRunner` runs the steps with progress and cancellation. Each clip is cut from
+  its own video (see "Exporting several videos").
 - **Audio levels** (`AudioLevels`): a rough loudness per stream from the waveform peaks (the power average of the
   peaks above −45 dBFS) and the volumes that bring the streams to the average of their levels, a boost never passing
   0 dBFS at the loudest peak. The editor's "Even out all tracks" uses it.
@@ -262,8 +290,8 @@ presentation time, so a value just after the keyframe works. Matroska and most o
 their cut points are marked approximate.
 
 ffmpeg ends a stream copy by decode time, so with B-frames each clip comes out a few frames longer than planned.
-Clips that follow on in the source as well as in the output (one's out-point is the next one's in-point) are cut
-as one stretch in a merged lossless export (`ExportPlanner.JoinTouching`): cut separately, the second would start at
+Clips that follow on in the source as well as in the output (one's out-point is the next one's in-point, in the same
+video) are cut as one stretch in a merged lossless export (`ExportPlanner.JoinTouching`): cut separately, the second would start at
 the keyframe before the join and play those frames twice. They then share one chapter, the first clip's. Separate
 files and re-encoded exports cut exactly, so they keep one cut per clip.
 A merged lossless export cuts every clip to a temporary file and joins them with the concat demuxer; chapters are
@@ -415,12 +443,13 @@ Claude ──stdio──> HighlightCut.exe mcp (McpBridge) ──named pipe─�
 | `search_transcript`, `find_filler_words` | Where a word or phrase (case and punctuation ignored), or the user's filler words (Settings → Transcription), are said |
 | `cut_ranges`, `cut_filler_words` | Cut any source ranges (e.g. from the transcript), or the filler words, out of the clips as one undo step |
 | `list_videos` | Video files in a folder, newest first |
+| `add_video`, `remove_video`, `move_video` | Append a video at the end of the timeline (a full path; the user may be asked, like `open_file`), remove one with its clips (the result says how many), or move one to a 1-based place; each one undo step, returning the videos with their new offsets and the clips |
 | `add_segment`, `remove_segment`, `trim_segment`, `split_segment`, `join_segments`, `set_included`, `move_segment`, `set_label`, `set_color` | One edit each (the commands above); a range or trim over another clip is refused; `add_segment` takes an optional label and colour, and a range over a join becomes one clip per video |
 | `edit_timeline` | Several edits as one undo step, all or nothing (actions add, remove, trim, split, join, include, exclude, move, rename, color) |
 | `revert_action`, `undo`, `redo` | Take edits back |
 | `seek`, `set_playing` | Show a frame or play |
 | `open_file`, `save_project` | Open a video or project; save as `.highlightcut.json` (full paths only); the user may be asked first |
-| `export`, `get_export_status`, `cancel_export` | Export like the Export button (runs in the background; the Claude panel shows it); choices left out keep the dialog's; waits up to 20 s, then Claude polls |
+| `export`, `get_export_status`, `cancel_export` | Export like the Export button (runs in the background; the Claude panel shows it); choices left out keep the dialog's; waits up to 20 s, then Claude polls. Several videos are joined as the dialog does; a lossless join of videos that differ is refused with why, before the user is asked |
 
 A refused edit (`EditException`, e.g. "Clip 7 does not exist") goes back to Claude as a tool error it can act on.
 Results are JSON; times are seconds on the timeline (every video end to end, the numbers the user sees; with one video,
@@ -464,6 +493,12 @@ bind to view models and never change the project themselves.
   failed, denied, cancelled). The Export button reads "Exporting 45%" over a progress strip. ✕ and Esc on the
   export dialog hide a running export (`Dismiss`), and the button or Ctrl+E shows it again. `cancel_export` and the
   card's Cancel call `ExportViewModel.CancelExport`.
+- **Claude's videos**: `add_video` goes through `EditorMcpHost.AddVideoAsync`: the Open files permission (Ask shows
+  "Claude wants to add part2.mp4", `ClaudeFileRequestViewModel.AskToAddAsync`), then `EditorViewModel.AddVideoForClaudeAsync`,
+  which is Add video…'s `AddVideosAsync` with `EditOrigin.Assistant` and the reason a video was not added. It keeps the
+  preview, so the timeline, player and lanes follow as for the user. `remove_video` and `move_video` execute
+  `RemoveSourceCommand` and `MoveSourceCommand` as Claude's edits, the commands the Videos list's `RemoveVideo` and
+  `MoveVideo` run; the editor follows them through `OnSourcesChanged`, as for any change of the videos.
 - **Claude's other requests**: `open_file` and `save_project` follow Settings → MCP server → Open files and Save
   project. For Ask, `EditorMcpHost.PermitAsync` shows `ClaudeFileRequestViewModel` (`ClaudePanelViewModel.Files`) in
   the same banner: the banner binds to `ClaudePanelViewModel.Request` (`IClaudeRequest`), the open/save request while

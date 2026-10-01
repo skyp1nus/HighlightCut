@@ -11,7 +11,7 @@ starts with a short bold phrase. The same line goes into [CHANGELOG.uk.md](CHANG
 
 ### New
 
-- **Several videos in one project.** Add videos with Add video… in the project menu (Ctrl+Shift+A), the + at the end of the timeline or by dropping them onto the timeline. They sit end to end on one timeline, each join marked with the next video’s name, and play through as one. Reorder or remove them in the Videos list above the clips, and undo any of it. Keyframes, the waveform, silences, scenes and the transcript work across all of them, and each video keeps its own track volumes. Exporting several videos into one file comes in the next version.
+- **Several videos in one project.** Add videos with Add video… in the project menu (Ctrl+Shift+A), the + at the end of the timeline or by dropping them onto the timeline. They sit end to end on one timeline, each join marked with the next video’s name, and play through as one. Reorder or remove them in the Videos list above the clips, and undo any of it. Keyframes, the waveform, silences, scenes and the transcript work across all of them, and each video keeps its own track volumes. Export joins them into one file or writes separate files: lossless when the videos match, otherwise re-encoded to the first video’s size and frame rate, letterboxed rather than stretched. If lossless can’t join them, the Export dialog says which videos differ before anything is written. Claude can add, remove and reorder videos and export them too.
 
 ### Improved
 

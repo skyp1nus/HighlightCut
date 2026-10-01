@@ -12,22 +12,57 @@ namespace HighlightCut.Media.Export;
 /// </summary>
 public static class FfmpegCommands
 {
-    public static FFMpegArgumentProcessor ForStep(ExportPlan plan, ExportStep step) => step.Kind switch
+    /// <summary>
+    /// The command for one step. Each clip is cut from its own video with that video's audio choices
+    /// (<see cref="ExportSettings.ForSource"/>); a file joining several videos follows <see cref="ExportPlan.Layout"/>.
+    /// </summary>
+    public static FFMpegArgumentProcessor ForStep(ExportPlan plan, ExportStep step)
     {
-        ExportStepKind.Cut => LosslessCut(plan.Source, step.Clips[0], plan.Settings, step.OutputPath, final: !step.IsTemporary),
-        ExportStepKind.Concat => Concat(plan.ConcatListPath!, plan.ChaptersPath, plan.Settings, step.OutputPath,
-            AudioGains(plan.Source, plan.Settings)),
-        ExportStepKind.Encode => EncodeClip(plan.Source, step.Clips[0], plan.Settings, step.OutputPath),
-        ExportStepKind.EncodeMerged => EncodeMerged(plan.Source, step.Clips, plan.Settings, plan.ChaptersPath, step.OutputPath),
-        _ => throw new ArgumentOutOfRangeException(nameof(step)),
-    };
+        var clip = step.Clips[0];
+        var info = plan.InfoOf(clip);
+        var settings = plan.Settings.ForSource(clip.SourceId);
+        return step.Kind switch
+        {
+            ExportStepKind.Cut when plan.Layout is { } layout && step.IsTemporary =>
+                JoinedCut(info, clip, plan.Settings, layout, step.OutputPath),
+            ExportStepKind.Cut => LosslessCut(info, clip, settings, step.OutputPath, final: !step.IsTemporary),
+            ExportStepKind.Concat => Concat(plan.ConcatListPath!, plan.ChaptersPath, plan.Settings, step.OutputPath,
+                plan.Layout?.SharedGains ?? AudioGains(info, settings)),
+            ExportStepKind.Encode => EncodeClip(info, clip, settings, step.OutputPath),
+            ExportStepKind.EncodeMerged when plan.Layout is { } layout =>
+                EncodeJoined(plan, layout, step.Clips, plan.Settings, plan.ChaptersPath, step.OutputPath),
+            ExportStepKind.EncodeMerged => EncodeMerged(info, step.Clips, settings, plan.ChaptersPath, step.OutputPath),
+            _ => throw new ArgumentOutOfRangeException(nameof(step)),
+        };
+    }
 
     /// <summary>Stream copy of one clip: <c>-ss</c> before <c>-i</c> (fast, starts at a keyframe), <c>-t</c> after.</summary>
     /// <param name="final">
     /// The clip's own output. Only that one changes audio volume: the pieces of a merge are copied as they are, and
     /// the volume is applied once when they are joined, so the re-encoded audio has no gaps at the joins.
     /// </param>
-    public static FFMpegArgumentProcessor LosslessCut(MediaInfo source, ExportClip clip, ExportSettings settings, string output, bool final)
+    public static FFMpegArgumentProcessor LosslessCut(MediaInfo source, ExportClip clip, ExportSettings settings, string output, bool final) =>
+        CopyCut(source, clip, settings, output, final, StreamMaps(source, settings), final ? AudioGains(source, settings) : []);
+
+    /// <summary>
+    /// Stream copy of one piece of a lossless file that joins several videos: the picture and the video's track for each
+    /// output track (<see cref="ExportLayout.Lanes"/>), so every piece has the same streams. A track whose volume differs
+    /// between the videos gets this video's volume here (re-encoded); the others are copied and changed once when joined.
+    /// </summary>
+    public static FFMpegArgumentProcessor JoinedCut(MediaInfo source, ExportClip clip, ExportSettings settings, ExportLayout layout, string output)
+    {
+        var inputs = layout.Inputs[clip.SourceId];
+        var maps = new List<string>();
+        if (source.Video is { } v)
+            maps.Add("-map 0:" + v.Index.ToString(CultureInfo.InvariantCulture));
+        maps.AddRange(inputs.Select(a => "-map 0:" + (a.Stream ?? throw new ArgumentException("A video lacks a track.", nameof(layout)))
+            .Index.ToString(CultureInfo.InvariantCulture)));
+        var gains = Enumerable.Range(0, inputs.Count).Where(k => !layout.IsShared(k)).Select(k => (k, inputs[k].GainDb)).ToList();
+        return CopyCut(source, clip, settings, output, final: false, maps, gains);
+    }
+
+    private static FFMpegArgumentProcessor CopyCut(MediaInfo source, ExportClip clip, ExportSettings settings, string output, bool final,
+        IEnumerable<string> maps, IReadOnlyList<(int Position, double GainDb)> gains)
     {
         var cut = clip.Lossless ?? throw new ArgumentException("The clip has no lossless cut points.", nameof(clip));
         return FFMpegArguments
@@ -35,14 +70,11 @@ public static class FfmpegCommands
             .OutputToFile(output, overwrite: true, o =>
             {
                 o.WithCustomArgument("-t " + FfmpegText.Seconds(cut.Duration));
-                foreach (string map in StreamMaps(source, settings))
+                foreach (string map in maps)
                     o.WithCustomArgument(map);
                 o.WithCustomArgument("-c copy");
-                if (final)
-                {
-                    foreach (string gain in GainArguments(AudioGains(source, settings), reencode: true))
-                        o.WithCustomArgument(gain);
-                }
+                foreach (string gain in GainArguments(gains, reencode: true))
+                    o.WithCustomArgument(gain);
                 // The kept lead-in before -ss gets negative timestamps; shift them to start at zero.
                 if (cut.SeekTo > 0)
                     o.WithCustomArgument("-avoid_negative_ts make_zero");
@@ -144,6 +176,103 @@ public static class FfmpegCommands
     }
 
     /// <summary>
+    /// Re-encodes the clips of several videos into one file in one pass, like <see cref="EncodeMerged"/>. Every clip is its
+    /// own seeked input from its video, brought to <paramref name="layout"/> before the concat filter joins them: the picture
+    /// scaled to fit the first video's size without stretching (padded with black), at its frame rate (constant), and track N
+    /// of each video at its volume, resampled to output track N (silence where a video has no such track).
+    /// </summary>
+    public static FFMpegArgumentProcessor EncodeJoined(ExportPlan plan, ExportLayout layout, IReadOnlyList<ExportClip> clips,
+        ExportSettings settings, string? chaptersPath, string output)
+    {
+        if (clips.Count == 0)
+            throw new ArgumentException("Nothing to encode.", nameof(clips));
+        FFMpegArguments? args = null;
+        foreach (var c in clips)
+        {
+            string path = plan.InfoOf(c).Path;
+            string seek = $"-ss {FfmpegText.Seconds(c.Start)} -t {FfmpegText.Seconds(c.End - c.Start)}";
+            args = args is null
+                ? FFMpegArguments.FromFileInput(path, verifyExists: false, o => o.WithCustomArgument(seek))
+                : args.AddFileInput(path, verifyExists: false, o => o.WithCustomArgument(seek));
+        }
+        if (chaptersPath is not null)
+            args = args!.AddFileInput(chaptersPath, verifyExists: false, o => o.WithCustomArgument("-f ffmetadata"));
+
+        string graph = JoinFilter(layout, [.. clips.Select(c => (plan.InfoOf(c), layout.Inputs[c.SourceId], c.End - c.Start))]);
+        return args!
+            .OutputToFile(output, overwrite: true, o =>
+            {
+                o.WithCustomArgument($"-filter_complex \"{graph}\"");
+                if (layout.Video is not null)
+                    o.WithCustomArgument("-map \"[v]\"");
+                for (int k = 0; k < layout.Lanes.Count; k++)
+                    o.WithCustomArgument($"-map \"[a{k}]\"");
+                if (layout.Video is { } v)
+                {
+                    foreach (string codec in VideoCodecs(v, settings))
+                        o.WithCustomArgument(codec);
+                }
+                if (layout.Lanes.Count > 0)
+                    o.WithCustomArgument(AudioCodec(settings.Audio.IsCopy ? AudioEncoding.Aac192 : settings.Audio));
+                if (chaptersPath is not null)
+                    o.WithCustomArgument("-map_chapters " + clips.Count.ToString(CultureInfo.InvariantCulture));
+                o.WithCustomArgument("-map_metadata 0");
+                if (settings.IsMovLike)
+                    o.WithCustomArgument("-movflags +faststart");
+                o.ForceFormat(settings.Muxer);
+            })
+            .WithLogLevel(FFMpegCore.Enums.FFMpegLogLevel.Error);
+    }
+
+    /// <summary>
+    /// The filter graph of <see cref="EncodeJoined"/>: each input brought to the layout, then the concat filter, e.g.
+    /// <c>[0:v:0]setpts=PTS-STARTPTS,scale=…,pad=…,setsar=1,fps=30,format=yuv420p[v0];[0:a:0]asetpts=PTS-STARTPTS,volume=-6dB,aresample=48000,aformat=…[a0x0];…</c>.
+    /// Each input starts at 0: after a seek its first frame can be a little later, and <c>fps</c> would then start a frame
+    /// late and leave a gap at the join. Then <c>[v0][a0x0][v1][a1x0]concat=n=2:v=1:a=1[v][a0]</c>.
+    /// </summary>
+    /// <param name="inputs">Per input (clip): its video, what it plays on each output track, and its length in seconds.</param>
+    public static string JoinFilter(ExportLayout layout, IReadOnlyList<(MediaInfo Info, IReadOnlyList<LaneInput> Lanes, double Duration)> inputs)
+    {
+        var ci = CultureInfo.InvariantCulture;
+        var sb = new StringBuilder();
+        string w = layout.Width.ToString(ci), h = layout.Height.ToString(ci);
+        for (int i = 0; i < inputs.Count; i++)
+        {
+            var (info, lanes, duration) = inputs[i];
+            string d = FfmpegText.Seconds(duration);
+            if (layout.Video is not null)
+            {
+                sb.Append(info.Video is not null
+                    ? $"[{i}:v:0]setpts=PTS-STARTPTS,scale={w}:{h}:force_original_aspect_ratio=decrease:force_divisible_by=2,pad={w}:{h}:(ow-iw)/2:(oh-ih)/2:black,setsar=1,"
+                    : $"color=c=black:s={w}x{h}:r={layout.FrameRate},trim=duration={d},");
+                sb.Append(ci, $"fps={layout.FrameRate},format=yuv420p[v{i}];");
+            }
+            for (int k = 0; k < layout.Lanes.Count; k++)
+            {
+                var lane = layout.Lanes[k];
+                string format = $"aresample={lane.SampleRate.ToString(ci)},aformat=sample_fmts=fltp:channel_layouts={lane.Layout}";
+                sb.Append(lanes[k].Stream is { } stream
+                    ? $"[{i}:a:{stream.Position.ToString(ci)}]asetpts=PTS-STARTPTS," + (lanes[k].GainDb != 0 ? FfmpegText.VolumeFilter(lanes[k].GainDb) + "," : "") + format
+                    : $"anullsrc=r={lane.SampleRate.ToString(ci)}:cl={lane.Layout},atrim=duration={d}");
+                sb.Append(ci, $"[a{i}x{k}];");
+            }
+        }
+        for (int i = 0; i < inputs.Count; i++)
+        {
+            if (layout.Video is not null)
+                sb.Append(ci, $"[v{i}]");
+            for (int k = 0; k < layout.Lanes.Count; k++)
+                sb.Append(ci, $"[a{i}x{k}]");
+        }
+        sb.Append(ci, $"concat=n={inputs.Count}:v={(layout.Video is not null ? 1 : 0)}:a={layout.Lanes.Count}");
+        if (layout.Video is not null)
+            sb.Append("[v]");
+        for (int k = 0; k < layout.Lanes.Count; k++)
+            sb.Append(ci, $"[a{k}]");
+        return sb.ToString();
+    }
+
+    /// <summary>
     /// <c>[0:v:0][0:a:0][1:v:0][1:a:0]concat=n=2:v=1:a=1[v][a0]</c> for the given audio positions. An audio stream with
     /// a gain leaves the concat as <c>[c0]</c> and goes through a volume filter: <c>;[c0]volume=-6dB[a0]</c>.
     /// </summary>
@@ -234,31 +363,37 @@ public static class FfmpegCommands
     {
         if (source.Video is { } v)
         {
-            var enc = settings.Video;
-            if (settings.GpuEncoder is { } gpu)
-            {
-                yield return gpu.Arguments(enc);
-            }
-            else
-            {
-                yield return $"-c:v {enc.Codec} -preset {enc.Preset} -crf {enc.Crf.ToString(CultureInfo.InvariantCulture)}";
-                // Players expect 8-bit 4:2:0.
-                if (!string.Equals(v.PixelFormat, "yuv420p", StringComparison.Ordinal))
-                    yield return "-pix_fmt yuv420p";
-            }
-            if (settings.IsMovLike && enc.Codec == "libx265")
-                yield return "-tag:v hvc1";
+            foreach (string codec in VideoCodecs(v, settings))
+                yield return codec;
         }
         if (SelectedAudio(source, settings).Count > 0)
-        {
-            var audio = settings.Audio.IsCopy && merged ? AudioEncoding.Aac192 : settings.Audio;
-            yield return audio.IsCopy
-                ? "-c:a copy"
-                : $"-c:a {audio.Codec} -b:a {audio.BitrateKbps.ToString(CultureInfo.InvariantCulture)}k";
-        }
+            yield return AudioCodec(settings.Audio.IsCopy && merged ? AudioEncoding.Aac192 : settings.Audio);
         if (!merged && KeptSubtitles(source, settings).Count > 0)
             yield return "-c:s copy";
     }
+
+    /// <summary>The video encoder: on the GPU when the settings have one, else x264 or x265 in 8-bit 4:2:0.</summary>
+    private static IEnumerable<string> VideoCodecs(VideoStreamInfo v, ExportSettings settings)
+    {
+        var enc = settings.Video;
+        if (settings.GpuEncoder is { } gpu)
+        {
+            yield return gpu.Arguments(enc);
+        }
+        else
+        {
+            yield return $"-c:v {enc.Codec} -preset {enc.Preset} -crf {enc.Crf.ToString(CultureInfo.InvariantCulture)}";
+            // Players expect 8-bit 4:2:0.
+            if (!string.Equals(v.PixelFormat, "yuv420p", StringComparison.Ordinal))
+                yield return "-pix_fmt yuv420p";
+        }
+        if (settings.IsMovLike && enc.Codec == "libx265")
+            yield return "-tag:v hvc1";
+    }
+
+    private static string AudioCodec(AudioEncoding audio) => audio.IsCopy
+        ? "-c:a copy"
+        : $"-c:a {audio.Codec} -b:a {audio.BitrateKbps.ToString(CultureInfo.InvariantCulture)}k";
 }
 
 /// <summary>Text files the export writes for ffmpeg.</summary>

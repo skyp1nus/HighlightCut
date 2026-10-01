@@ -41,6 +41,11 @@ public sealed record AudioEncoding(string Codec, int BitrateKbps, string Label)
     public bool IsCopy => Codec == "copy";
 }
 
+/// <summary>One video's audio choices in a project with several (<see cref="ExportSettings.SourceAudio"/>).</summary>
+/// <param name="StreamIndexes">Its unmuted tracks: what <see cref="ExportSettings.AudioStreamIndexes"/> is for one video.</param>
+/// <param name="GainsDb">Its tracks' volumes: what <see cref="ExportSettings.AudioGainsDb"/> is for one video.</param>
+public sealed record SourceAudioSettings(IReadOnlyList<int> StreamIndexes, IReadOnlyDictionary<int, double> GainsDb);
+
 public sealed record ExportSettings
 {
     public CutMode Mode { get; init; } = CutMode.Lossless;
@@ -66,6 +71,19 @@ public sealed record ExportSettings
     /// re-encoded (AAC when it would otherwise be copied); every other stream is left as the mode says.
     /// </summary>
     public IReadOnlyDictionary<int, double> AudioGainsDb { get; init; } = new Dictionary<int, double>();
+
+    /// <summary>
+    /// A project with several videos: each video's <see cref="AudioStreamIndexes"/> and <see cref="AudioGainsDb"/>, by video
+    /// id (<see cref="HighlightCut.Core.Model.SourceMedia.Id"/>), since each file has its own tracks. A video not listed uses
+    /// the two above.
+    /// </summary>
+    public IReadOnlyDictionary<int, SourceAudioSettings> SourceAudio { get; init; } = new Dictionary<int, SourceAudioSettings>();
+
+    /// <summary>The settings for cutting from one video: its own audio choices (<see cref="SourceAudio"/>).</summary>
+    public ExportSettings ForSource(int sourceId) =>
+        SourceAudio.TryGetValue(sourceId, out var audio)
+            ? this with { AudioStreamIndexes = audio.StreamIndexes, AudioGainsDb = audio.GainsDb }
+            : this;
 
     public required string OutputFolder { get; init; }
 

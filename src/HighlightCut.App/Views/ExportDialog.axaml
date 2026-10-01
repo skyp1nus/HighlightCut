@@ -46,8 +46,15 @@
                 </DataTemplate>
               </ItemsControl.ItemTemplate>
             </ItemsControl>
-            <TextBlock IsVisible="{Binding IsCopy}" Text="{Binding SnapNote}" FontSize="11" LineHeight="16.5"
+            <TextBlock IsVisible="{Binding ShowSnapNote}" Text="{Binding SnapNote}" FontSize="11" LineHeight="16.5"
                        Foreground="{StaticResource Text4Brush}" TextWrapping="Wrap" />
+            <!-- Videos that stream copy cannot join: why, and re-encoding offered. -->
+            <StackPanel Name="LosslessProblem" IsVisible="{Binding HasLosslessProblem}" Spacing="4">
+              <TextBlock Text="{Binding LosslessProblem}" FontSize="11" LineHeight="16.5" Foreground="{StaticResource DangerBrush}"
+                         TextWrapping="Wrap" />
+              <Button Classes="link" FontSize="11" HorizontalAlignment="Left" Content="Re-encode instead"
+                      Command="{Binding UseReencodeCommand}" />
+            </StackPanel>
             <Grid IsVisible="{Binding IsEncode}" ColumnDefinitions="*,8,*">
               <ComboBox Classes="field small" HorizontalAlignment="Stretch" ItemsSource="{x:Static ex:VideoEncoding.All}"
                         SelectedItem="{Binding Video}" ToolTip.Tip="Video">
@@ -171,7 +178,7 @@
               <Button Classes="bone" IsVisible="{Binding IsAskingAboutExisting}" Height="30" Padding="18,0" Content="Overwrite"
                       Command="{Binding OverwriteCommand}" />
               <Button Classes="bone" IsVisible="{Binding ShowExportButton}" Height="30" Padding="18,0" Content="Export"
-                      ToolTip.Tip="Export (Enter)" Command="{Binding StartCommand}" />
+                      ToolTip.Tip="Export (Enter)" Command="{Binding StartCommand}" IsEnabled="{Binding !HasLosslessProblem}" />
               <Button Classes="soft risky" Height="30" Padding="14,0" CornerRadius="10" FontSize="12.5"
                       Content="Cancel export" Command="{Binding CancelExportCommand}">
                 <Button.IsVisible>

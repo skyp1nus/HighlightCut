@@ -142,10 +142,22 @@ public sealed partial class EditorViewModel
     /// Appends videos at the end of the timeline (a drop onto the timeline, Add video…), in the order given, as one undo
     /// step. Each is probed first; one that cannot be opened is skipped with the reason. Returns the ids they got.
     /// </summary>
-    public async Task<IReadOnlyList<int>> AddVideosAsync(IReadOnlyList<string> paths)
+    /// <param name="origin">Who adds them: Claude's <c>add_video</c> adds as <see cref="EditOrigin.Assistant"/>.</param>
+    /// <param name="failed">Gets each reason a video was not added, besides the status bar.</param>
+    public async Task<IReadOnlyList<int>> AddVideosAsync(IReadOnlyList<string> paths, EditOrigin origin = EditOrigin.User,
+        Action<string>? failed = null)
     {
+        void Fail(string message)
+        {
+            ShowMessage(message);
+            failed?.Invoke(message);
+        }
+
         if (!HasFile || MediaOpener is null)
+        {
+            failed?.Invoke(HasFile ? "Adding videos is not available." : "No video is open.");
             return [];
+        }
         var opened = new List<OpenedMedia>();
         foreach (string path in paths)
         {
@@ -157,11 +169,11 @@ public sealed partial class EditorViewModel
             }
             catch (FileNotFoundException)
             {
-                ShowMessage($"{name} was not found. It may have been moved or deleted.");
+                Fail($"{name} was not found. It may have been moved or deleted.");
             }
             catch (Exception e) when (e is MediaToolException or IOException or UnauthorizedAccessException)
             {
-                ShowMessage($"Could not open {name}: {e.Message}");
+                Fail($"Could not open {name}: {e.Message}");
             }
             finally
             {
@@ -173,20 +185,37 @@ public sealed partial class EditorViewModel
         {
             foreach (var o in opened)
                 (o.Preview as IDisposable)?.Dispose();
+            if (opened.Count > 0)
+                failed?.Invoke("Another project was opened meanwhile.");
             return [];
         }
         int first = Session.Project.NextSourceId;
         for (int i = 0; i < opened.Count; i++)
             AddPreview(first + i, opened[i].Preview);
         var commands = opened.Select(o => (IEditCommand)new AddSourceCommand(o.Source)).ToList();
-        if (!TryEdit(() => Session.Execute(commands.Count == 1 ? commands[0]
-                : new BatchCommand(commands[0].Name, $"Added {commands.Count} videos", commands))))
+        try
+        {
+            Session.Execute(commands.Count == 1 ? commands[0] : new BatchCommand(commands[0].Name, $"Added {commands.Count} videos", commands),
+                origin);
+        }
+        catch (EditException e)
+        {
+            Fail(e.Message);
             return [];
+        }
         IReadOnlyList<int> ids = [.. Enumerable.Range(first, opened.Count)];
         ShowMessage(opened.Count == 1
             ? $"Added {Path.GetFileName(opened[0].Source.Path)} at {Core.Time.TimeFormat.MinutesSeconds(Session.Project.OffsetOf(first))}."
             : $"Added {opened.Count} videos at the end of the timeline.");
         return ids;
+    }
+
+    /// <summary>Claude's <c>add_video</c>: appends one video as Claude's edit. Returns why it was not added, or null.</summary>
+    public async Task<string?> AddVideoForClaudeAsync(string path)
+    {
+        string? error = null;
+        var ids = await AddVideosAsync([path], EditOrigin.Assistant, e => error ??= e).ConfigureAwait(true);
+        return ids.Count > 0 ? null : error ?? $"{Path.GetFileName(path)} was not added.";
     }
 
     /// <summary>

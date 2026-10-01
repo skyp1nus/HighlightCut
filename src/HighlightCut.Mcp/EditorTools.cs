@@ -64,6 +64,14 @@ public sealed record EditResult(
     IReadOnlyList<ClipInfo> Clips,
     double OutputDuration);
 
+public sealed record VideoEditResult(
+    [property: Description("Id of the edit in the history (for revert_action); null if nothing changed.")] long? Action,
+    string Result,
+    [property: Description("Every video in timeline order, with where each now starts.")] IReadOnlyList<SourceInfo> Sources,
+    [property: Description("In output order, with their timeline ranges after the change.")] IReadOnlyList<ClipInfo> Clips,
+    double OutputDuration,
+    [property: Description("Length of the timeline in seconds: every video end to end.")] double TimelineDuration);
+
 public sealed record HistoryItem(long Id, string Description, [property: Description("\"user\" or \"claude\".")] string By, string Time,
     [property: Description("False when undone.")] bool Applied, bool Reverted);
 
@@ -148,6 +156,8 @@ public sealed class EditorTools(IEditorHost host)
     public const string Instructions = """
         HighlightCut is a video editor for cutting long recordings down to the parts worth keeping. A project has
         one video, or several end to end on one timeline (get_project lists them as sources, with where each starts).
+        add_video appends another video, remove_video takes one out with its clips, move_video reorders them; the
+        export joins the clips of every video into one file.
         Clips are ranges of the timeline in seconds, the same times the user sees; a clip belongs to one video and
         never runs into the next, so a range over the join between two videos becomes one clip per video. The
         order of the clips in the project is the order of the output. Parts of the timeline not covered by an
@@ -170,7 +180,9 @@ public sealed class EditorTools(IEditorHost host)
 
         Everything you change appears in HighlightCut's Claude panel, highlighted, and the user can undo it. For
         several related changes use edit_timeline with a short description, so they form one undo step.
-        When the cut is ready, export writes it out (lossless and next to the video unless told otherwise).
+        When the cut is ready, export writes it out (lossless and next to the video unless told otherwise). Lossless
+        joins several videos only when they match (codecs, size, frame rate, audio tracks); otherwise export says how
+        they differ, and mode reencode joins them, scaled to the first video's size and frame rate.
         """;
 
     private static readonly string[] VideoExtensions =
@@ -196,8 +208,9 @@ public sealed class EditorTools(IEditorHost host)
     // ---- Reading -------------------------------------------------------------------------
 
     [McpServerTool(Name = "get_project", Title = "Get the project", ReadOnly = true, Idempotent = true)]
-    [Description("The videos (sources, in timeline order, with where each starts on the timeline), the playhead and every clip " +
-                 "in output order with its timeline range and video. Call this before editing.")]
+    [Description("The videos (sources, in timeline order, with their ids and where each starts on the timeline), the playhead and " +
+                 "every clip in output order with its timeline range and video. Call this before editing; add_video, remove_video and " +
+                 "move_video change the videos.")]
     public Task<ProjectInfo> GetProject() => host.RunAsync(ctx => Task.FromResult(Describe(ctx)));
 
     [McpServerTool(Name = "get_history", Title = "List recent edits", ReadOnly = true, Idempotent = true)]
@@ -496,6 +509,37 @@ public sealed class EditorTools(IEditorHost host)
             return Describe(ctx);
         });
 
+    [McpServerTool(Name = "add_video", Title = "Add a video", OpenWorld = true)]
+    [Description("Appends a video at the end of the timeline, after the videos already there, as one undo step; the open project " +
+                 "and its clips stay. Its clips are then cut with timeline seconds from its offset on (in sources). To start a new " +
+                 "project from a video instead, use open_file. The user may be asked first (Settings → MCP server → Open files); " +
+                 "the call waits for their answer.")]
+    public Task<VideoEditResult> AddVideo([Description("Full path of the video file.")] string path,
+        CancellationToken cancellationToken = default) =>
+        host.RunAsync(async ctx =>
+        {
+            RequireFile(ctx);
+            RequireFullPath(path);
+            if (!File.Exists(path))
+                throw new McpException($"{path} does not exist.");
+            if (await ctx.AddVideoAsync(path, cancellationToken).ConfigureAwait(true) is { } error)
+                throw new McpException(error);
+            return VideoResult(ctx, ctx.Session.History.NextUndo);
+        });
+
+    [McpServerTool(Name = "remove_video", Title = "Remove a video", Destructive = true)]
+    [Description("Removes a video from the project together with every clip cut from it (the result says how many), as one undo " +
+                 "step. The videos after it move up the timeline. The only video cannot be removed.")]
+    public Task<VideoEditResult> RemoveVideo([Description("Video id (sources in get_project).")] int video) =>
+        EditVideos(project => new RemoveSourceCommand(RequireVideo(project, video)));
+
+    [McpServerTool(Name = "move_video", Title = "Reorder a video")]
+    [Description("Moves a video to another place on the timeline; its clips move with it, and the output order of the clips " +
+                 "stays as it is. Timeline times of the videos it passes change: read them from the result.")]
+    public Task<VideoEditResult> MoveVideo([Description("Video id (sources in get_project).")] int video,
+        [Description("1-based place on the timeline.")] int position) =>
+        EditVideos(project => new MoveSourceCommand(RequireVideo(project, video), position - 1));
+
     [McpServerTool(Name = "save_project", Title = "Save the project")]
     [Description("Saves the project as .highlightcut.json: where it was saved before, or to the given path. The user may be asked " +
                  "first (Settings → MCP server → Save project); the call waits for their answer.")]
@@ -671,13 +715,16 @@ public sealed class EditorTools(IEditorHost host)
     private static readonly string[] AudioCodecs = ["copy", "aac"];
 
     [McpServerTool(Name = "export", Title = "Export the video", OpenWorld = true)]
-    [Description("Exports the included clips, like the Export button, with the progress shown in HighlightCut. Options you leave out " +
+    [Description("Exports the included clips, like the Export button, with the progress shown in HighlightCut; clips from several videos " +
+                 "are joined into one file, or one file each. Lossless joins several videos only when they match (codecs, size, frame " +
+                 "rate, audio tracks); otherwise it is refused with how they differ, and reencode joins them at the first video's size " +
+                 "and frame rate (letterboxed, not stretched), track N of each video on track N. Options you leave out " +
                  "keep what the Export dialog has, which starts from the user's Settings → Export. The user may be asked to allow " +
                  "the export first, and can decline. Existing files are never overwritten: a number is added to the name. " +
                  "Once it runs, waits up to 20 s; for a longer export, call get_export_status.")]
     public async Task<ExportResult> Export(
         [Description("lossless (stream copy, fast; each clip starts at the keyframe at or before its start) or reencode " +
-                     "(frame-accurate, slower).")] string? mode = null,
+                     "(frame-accurate, slower; joins videos that differ).")] string? mode = null,
         [Description("mp4, mov or mkv.")] string? container = null,
         [Description("true: one file with all included clips; false: one file per clip.")] bool? merge = null,
         [Description("Full path of the folder to write to; the Export dialog's folder if omitted.")] string? folder = null,
@@ -748,6 +795,26 @@ public sealed class EditorTools(IEditorHost host)
             var entry = Guard(() => ctx.Session.Execute(command(ctx.Session.Project), EditOrigin.Assistant));
             return Task.FromResult(Result(ctx, entry));
         });
+
+    private Task<VideoEditResult> EditVideos(Func<Project, IEditCommand> command) =>
+        host.RunAsync(ctx =>
+        {
+            RequireFile(ctx);
+            var entry = Guard(() => ctx.Session.Execute(command(ctx.Session.Project), EditOrigin.Assistant));
+            return Task.FromResult(VideoResult(ctx, entry));
+        });
+
+    private static int RequireVideo(Project project, int id) =>
+        project.FindSource(id) is not null
+            ? id
+            : throw new EditException($"There is no video {id}; the videos are {string.Join(", ", project.Sources.Select(s => $"{s.Id} ({s.FileName})"))}.");
+
+    private static VideoEditResult VideoResult(IEditorContext ctx, HistoryEntry? entry)
+    {
+        var project = ctx.Session.Project;
+        return new VideoEditResult(entry?.Id, entry?.Description ?? "Nothing changed.", Sources(ctx), Clips(project),
+            Round(project.OutputDuration), Round(project.TimelineDuration));
+    }
 
     private Task<EditResult> UndoRedo(bool undo) =>
         host.RunAsync(ctx =>
@@ -880,14 +947,21 @@ public sealed class EditorTools(IEditorHost host)
     internal static ProjectInfo Describe(IEditorContext ctx)
     {
         var project = ctx.Session.Project;
-        // The summary (codecs, resolution) is the open file's: the first video's.
-        List<SourceInfo> sources = !ctx.HasFile ? [] : [.. project.Sources.Select((s, i) => new SourceInfo(s.Id, s.Path, s.FileName,
-            (i == 0 ? ctx.SourceSummary : null) ?? s.FileName, Round(s.Duration), Round(project.OffsetOf(s.Id)), Math.Round(s.FrameRate, 3),
-            [.. s.AudioTracks.Select((t, k) => TrackInfo(k + 1, t, project.MixOf(s.Id, t.Index)))]))];
+        var sources = Sources(ctx);
         var source = sources.FirstOrDefault();
         return new ProjectInfo(project.Name, source, ctx.ProjectPath, Round(ctx.Playhead), ctx.SelectedClipId, ctx.IsPlaying,
             Round(project.OutputDuration), source is null ? [] : Clips(project), ctx.AnalysisStatus,
             source is null ? null : StatusText(ctx.TranscriptStatus), sources, source is null ? null : Round(project.TimelineDuration));
+    }
+
+    /// <summary>The videos in timeline order; none without a file.</summary>
+    private static List<SourceInfo> Sources(IEditorContext ctx)
+    {
+        var project = ctx.Session.Project;
+        // The summary (codecs, resolution) is the open file's: the first video's.
+        return !ctx.HasFile ? [] : [.. project.Sources.Select((s, i) => new SourceInfo(s.Id, s.Path, s.FileName,
+            (i == 0 ? ctx.SourceSummary : null) ?? s.FileName, Round(s.Duration), Round(project.OffsetOf(s.Id)), Math.Round(s.FrameRate, 3),
+            [.. s.AudioTracks.Select((t, k) => TrackInfo(k + 1, t, project.MixOf(s.Id, t.Index)))]))];
     }
 
     private static AudioTrackInfo TrackInfo(int number, AudioTrack track, TrackMix mix) =>

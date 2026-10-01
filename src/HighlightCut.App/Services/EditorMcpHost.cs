@@ -91,6 +91,9 @@ public sealed class EditorMcpHost(EditorViewModel editor) : IEditorHost, IEditor
         bool started = false;
         try
         {
+            // Said before the user is asked: the videos cannot be joined without re-encoding.
+            if (export.LosslessReason is { } reason)
+                return reason + " Export with mode reencode to join them, or with merge false for separate files.";
             if (await AskToExportAsync(export.ClaudeTarget(), cancellationToken).ConfigureAwait(true) == ClaudeExportAnswer.Deny)
                 return "The user declined the export.";
             if (export.StartPreparedForClaude() is { } refused)
@@ -149,6 +152,12 @@ public sealed class EditorMcpHost(EditorViewModel editor) : IEditorHost, IEditor
         await PermitAsync(editor.Settings.OpenFilesPermission, files => files.AskToOpenAsync(path, cancellationToken),
             $"The user declined opening {Path.GetFileName(path)}.").ConfigureAwait(true)
         ?? await editor.OpenForClaudeAsync(path).ConfigureAwait(true);
+
+    /// <summary>Adds a video like Add video… does, after asking as for opening a file (Settings → MCP server → Open files).</summary>
+    public async Task<string?> AddVideoAsync(string path, CancellationToken cancellationToken) =>
+        await PermitAsync(editor.Settings.OpenFilesPermission, files => files.AskToAddAsync(path, cancellationToken),
+            $"The user declined adding {Path.GetFileName(path)}.").ConfigureAwait(true)
+        ?? await editor.AddVideoForClaudeAsync(path).ConfigureAwait(true);
 
     public async Task<string?> SaveAsync(string? path, CancellationToken cancellationToken)
     {

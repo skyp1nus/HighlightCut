@@ -33,6 +33,12 @@ public sealed record VideoStreamInfo(
     public (int Width, int Height) DisplaySize => Math.Abs(Rotation) % 180 == 90 ? (Height, Width) : (Width, Height);
 
     public double FrameDuration => FrameRate > 0 ? 1 / FrameRate : 1 / 30.0;
+
+    /// <summary>The frame rate as ffprobe gives it, e.g. "30000/1001"; what a re-encode of several videos keeps.</summary>
+    public string? FrameRateRational { get; init; }
+
+    /// <summary>The stream's time base, e.g. "1/15360". Lossless joins need the same in every video.</summary>
+    public string? TimeBase { get; init; }
 }
 
 /// <param name="Index">Stream index in the container.</param>
@@ -42,6 +48,9 @@ public sealed record AudioStreamInfo(int Index, int Position, string Codec, int 
     public string Label => !string.IsNullOrWhiteSpace(Title) ? Title!
         : !string.IsNullOrWhiteSpace(Language) && Language != "und" ? Language!.ToUpperInvariant()
         : $"Audio {Position + 1}";
+
+    /// <summary>ffprobe's channel layout, e.g. "stereo"; null when the file does not say.</summary>
+    public string? ChannelLayout { get; init; }
 }
 
 public sealed record SubtitleStreamInfo(int Index, string Codec, string? Language);

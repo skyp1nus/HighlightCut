@@ -4,6 +4,7 @@ using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using HighlightCut.App.Services;
+using HighlightCut.Core.Model;
 using HighlightCut.Core.Time;
 using HighlightCut.Media.Export;
 using HighlightCut.Media.Probing;
@@ -166,7 +167,8 @@ public sealed partial class ExportViewModel : ViewModelBase
     public partial ExportStage Stage { get; set; }
 
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(IsEncode), nameof(IsCopy), nameof(ModeTitle), nameof(Estimate), nameof(EstimateLine), nameof(Footer), nameof(Stats))]
+    [NotifyPropertyChangedFor(nameof(IsEncode), nameof(IsCopy), nameof(ModeTitle), nameof(Estimate), nameof(EstimateLine), nameof(Footer), nameof(Stats),
+        nameof(LosslessProblem), nameof(HasLosslessProblem), nameof(ShowSnapNote))]
     public partial ExportMode Mode { get; set; }
 
     [ObservableProperty]
@@ -174,13 +176,15 @@ public sealed partial class ExportViewModel : ViewModelBase
     public partial string Container { get; set; } = "MP4";
 
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(OutputPath), nameof(FileCountText), nameof(Footer), nameof(CanAddChapters), nameof(FileNamesText))]
+    [NotifyPropertyChangedFor(nameof(OutputPath), nameof(FileCountText), nameof(Footer), nameof(CanAddChapters), nameof(FileNamesText),
+        nameof(LosslessProblem), nameof(HasLosslessProblem), nameof(ShowSnapNote))]
     public partial bool Merge { get; set; } = true;
 
     [ObservableProperty]
     public partial bool AddChapters { get; set; } = true;
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(LosslessProblem), nameof(HasLosslessProblem), nameof(ShowSnapNote))]
     public partial bool KeepAllTracks { get; set; } = true;
 
     [ObservableProperty]
@@ -231,7 +235,40 @@ public sealed partial class ExportViewModel : ViewModelBase
     /// <summary>The design's sample has no file behind it, so its export is simulated.</summary>
     public bool IsSimulated => _editor.IsDemo || Preview is null;
 
-    private MediaPreview? Preview => _editor.Media as MediaPreview;
+    /// <summary>The first video's preview (the only one's with one video); null for the design's sample.</summary>
+    private MediaPreview? Preview => _editor.Session.Project.Source is { } s ? _editor.PreviewOf(s.Id) as MediaPreview : null;
+
+    /// <summary>The preview of every video an included clip comes from, in timeline order.</summary>
+    private List<(int Id, MediaPreview Preview)> UsedPreviews()
+    {
+        var project = _editor.Session.Project;
+        var parts = project.OutputParts();
+        return [.. project.Sources.Where(s => parts.Any(p => p.Clip.SourceId == s.Id))
+            .Select(s => (s.Id, Preview: _editor.PreviewOf(s.Id) as MediaPreview))
+            .Where(p => p.Preview is not null)
+            .Select(p => (p.Id, p.Preview!))];
+    }
+
+    /// <summary>
+    /// Why a lossless export cannot join the videos into one file (they differ in size, frame rate, codecs…), naming them;
+    /// null when it can, or when the export is not a lossless merge. The dialog says it and offers re-encoding.
+    /// </summary>
+    public string? LosslessProblem => LosslessReason is { } reason ? reason + " " + ExportPlanner.LosslessAdvice : null;
+
+    /// <summary><see cref="LosslessProblem"/> without what to do instead (Claude is told its own way).</summary>
+    public string? LosslessReason =>
+        Mode == ExportMode.Copy && Merge && !IsSimulated && _editor.Session.Project.Sources.Count > 1
+            ? ExportPlanner.LosslessMergeProblem(_editor.Session.Project, UsedPreviews().ToDictionary(p => p.Id, p => p.Preview.Info), BuildSettings())
+            : null;
+
+    public bool HasLosslessProblem => LosslessProblem is not null;
+
+    /// <summary>The note on keyframes, for a lossless export that can go ahead.</summary>
+    public bool ShowSnapNote => IsCopy && !HasLosslessProblem;
+
+    /// <summary>"Re-encode instead" under <see cref="LosslessProblem"/>.</summary>
+    [RelayCommand]
+    private void UseReencode() => Mode = ExportMode.Encode;
 
     public bool IsDialogOpen => Stage != ExportStage.Closed && !IsHidden;
     public bool IsConfiguring => Stage == ExportStage.Configure;
@@ -283,7 +320,8 @@ public sealed partial class ExportViewModel : ViewModelBase
         }
     }
 
-    public string Summary => $"{Included.Count} clips · {TimeFormat.Duration(Total)} · from {_editor.MediaFileName}";
+    public string Summary => $"{Included.Count} clips · {TimeFormat.Duration(Total)} · from " +
+        (_editor.Session.Project.Sources.Count > 1 ? $"{_editor.Session.Project.Sources.Count} videos" : _editor.MediaFileName);
 
     /// <summary>Next to the dialog title: "4 clips · 00:04:31.360".</summary>
     public string HeaderSummary => $"{Included.Count} clips · {TimeFormat.Timecode(Total)}";
@@ -394,7 +432,7 @@ public sealed partial class ExportViewModel : ViewModelBase
             if (HasError)
                 return ErrorText!;
             if (IsPreparing)
-                return $"{Math.Floor((Preview?.KeyframeProgress ?? 0) * 100):0}% · a lossless cut starts each clip on a keyframe";
+                return $"{Math.Floor(KeyframeProgress * 100):0}% · a lossless cut starts each clip on a keyframe";
             double elapsed = ((_finished ?? DateTime.UtcNow) - _started).TotalSeconds;
             string remaining = IsDone ? "done"
                 : Progress > 0.02 ? "~" + TimeFormat.Clock(elapsed * (1 - Progress) / Progress) + " left"
@@ -404,6 +442,9 @@ public sealed partial class ExportViewModel : ViewModelBase
             return $"elapsed {TimeFormat.Clock(elapsed)} · {remaining}{speedText}";
         }
     }
+
+    /// <summary>How far finding the keyframes of the videos the export cuts from has got, 0..1.</summary>
+    private double KeyframeProgress => UsedPreviews() is { Count: > 0 } used ? used.Average(p => p.Preview.KeyframeProgress) : 0;
 
     /// <summary>Seconds left, or null before there is an estimate.</summary>
     public double? RemainingSeconds
@@ -535,6 +576,9 @@ public sealed partial class ExportViewModel : ViewModelBase
         OnPropertyChanged(nameof(EstimateLine));
         OnPropertyChanged(nameof(FileCountText));
         OnPropertyChanged(nameof(OutputPath));
+        OnPropertyChanged(nameof(LosslessProblem));
+        OnPropertyChanged(nameof(HasLosslessProblem));
+        OnPropertyChanged(nameof(ShowSnapNote));
     }
 
     /// <summary>Hides the dialog; the export goes on.</summary>
@@ -618,6 +662,9 @@ public sealed partial class ExportViewModel : ViewModelBase
             Start(0);
             return;
         }
+        // The dialog says why and offers re-encoding; Enter does not get past it.
+        if (HasLosslessProblem)
+            return;
         _overwrite = Defaults.IfExists == FileExistsAction.Overwrite;
         // Settings → Export → If the file exists: Ask. The dialog asks before anything is written.
         if (Defaults.IfExists == FileExistsAction.Ask
@@ -627,7 +674,7 @@ public sealed partial class ExportViewModel : ViewModelBase
             ExistingFiles = existing;
             return;
         }
-        await RunAsync(Preview!).ConfigureAwait(true);
+        await RunAsync().ConfigureAwait(true);
     }
 
     /// <summary>Files the export would replace, while the dialog asks what to do about them.</summary>
@@ -657,11 +704,11 @@ public sealed partial class ExportViewModel : ViewModelBase
 
     private async Task StartAfterAskingAsync(bool overwrite)
     {
-        if (!IsAskingAboutExisting || Preview is not { } preview)
+        if (!IsAskingAboutExisting || Preview is null)
             return;
         ExistingFiles = [];
         _overwrite = overwrite;
-        await RunAsync(preview).ConfigureAwait(true);
+        await RunAsync().ConfigureAwait(true);
     }
 
     /// <summary>Starts the simulated export at <paramref name="progress"/> (demo screens); Claude's runs hidden.</summary>
@@ -749,7 +796,7 @@ public sealed partial class ExportViewModel : ViewModelBase
         IsByClaude = true;
         IsHidden = true;
         Loop = false;
-        _ = RunAsync(Preview!);
+        _ = RunAsync();
         return null;
     }
 
@@ -773,7 +820,8 @@ public sealed partial class ExportViewModel : ViewModelBase
     /// <summary>The settings as the Media layer takes them.</summary>
     public ExportSettings BuildSettings()
     {
-        var tracks = _editor.Session.Project.Source?.AudioTracks ?? [];
+        var project = _editor.Session.Project;
+        var tracks = project.Source?.AudioTracks ?? [];
         return new ExportSettings
         {
             Mode = Mode switch { ExportMode.Copy => CutMode.Lossless, ExportMode.Smart => CutMode.SmartCut, _ => CutMode.Reencode },
@@ -783,8 +831,13 @@ public sealed partial class ExportViewModel : ViewModelBase
             KeepAllTracks = KeepAllTracks,
             // Muted lanes are left out unless every track is kept.
             AudioStreamIndexes = [.. _editor.AudioLanes.Where(l => !l.IsMuted && l.Stream < tracks.Length).Select(l => tracks[l.Stream].Index)],
-            AudioGainsDb = _editor.Session.Project.AudioMix.Where(m => m.SourceId == _editor.Session.Project.Source?.Id && m.GainDb != 0)
+            AudioGainsDb = project.AudioMix.Where(m => m.SourceId == project.Source?.Id && m.GainDb != 0)
                 .ToDictionary(m => m.Index, m => m.GainDb),
+            // With several videos the lanes show the video under the playhead: each video's own mix decides.
+            SourceAudio = project.Sources.Count < 2 ? new Dictionary<int, SourceAudioSettings>() : project.Sources.ToDictionary(s => s.Id,
+                s => new SourceAudioSettings(
+                    [.. s.AudioTracks.Where(t => !project.MixOf(s.Id, t.Index).IsMuted).Select(t => t.Index)],
+                    s.AudioTracks.Select(t => project.MixOf(s.Id, t.Index)).Where(m => m.GainDb != 0).ToDictionary(m => m.Index, m => m.GainDb))),
             OutputFolder = OutputFolder,
             BaseName = BaseName,
             FileNamePattern = Pattern,
@@ -797,7 +850,7 @@ public sealed partial class ExportViewModel : ViewModelBase
         };
     }
 
-    private async Task RunAsync(MediaPreview preview)
+    private async Task RunAsync()
     {
         var cts = new CancellationTokenSource();
         _exportCts = cts;
@@ -811,17 +864,26 @@ public sealed partial class ExportViewModel : ViewModelBase
         Outcome = ExportOutcome.Running;
         try
         {
-            // A lossless export needs the keyframes: they are scanned now unless the Keyframes chip found them already.
-            IsPreparing = Mode == ExportMode.Copy && !preview.KeyframesComplete;
+            // Each clip is cut from its own video. A lossless export needs their keyframes: they are scanned now unless the
+            // Keyframes chip found them already. Keyframe times here are each video's own, not the timeline's.
+            var used = UsedPreviews();
+            if (LosslessProblem is { } problem)
+                throw new InvalidOperationException(problem);
+            IsPreparing = Mode == ExportMode.Copy && used.Any(p => !p.Preview.KeyframesComplete);
             if (IsPreparing)
                 StartStatsTimer();
-            var keyframes = Mode == ExportMode.Copy
-                ? await preview.ReadKeyframesAsync(cts.Token).ConfigureAwait(true)
-                : preview.Keyframes;
+            var sources = new Dictionary<int, ExportSource>();
+            foreach (var (id, preview) in used)
+            {
+                var keyframes = Mode == ExportMode.Copy
+                    ? await preview.ReadKeyframesAsync(cts.Token).ConfigureAwait(true)
+                    : preview.Keyframes;
+                sources[id] = new ExportSource(preview.Info, keyframes);
+            }
             cts.Token.ThrowIfCancellationRequested();
             IsPreparing = false;
 
-            var plan = ExportPlanner.Plan(_editor.Session.Project, preview.Info, keyframes, BuildSettings());
+            var plan = ExportPlanner.Plan(_editor.Session.Project, sources, BuildSettings());
             _plan = plan;
             BuildRows(plan);
             OnPropertyChanged(nameof(OutputPath));
