@@ -13,6 +13,10 @@ on:
         description: Publish the Version in Directory.Build.props as a GitHub release (creates the vX.Y.Z tag)
         type: boolean
         default: false
+      memory:
+        description: Measure the memory of this version against master on Windows (scripts/memory)
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -158,6 +162,61 @@ jobs:
           # No GPU here, so the check must say why DirectML did not start, and Auto must use the CPU.
           if (-not (Select-String -Quiet -Path probe.txt -Pattern 'Works = False, .*it did not start')) { throw 'The check did not see DirectML fall back.' }
           if (-not (Select-String -Quiet -Path probe.txt -Pattern 'Auto uses: CPU')) { throw 'Auto did not choose the CPU.' }
+
+  # Actions → CI → Run workflow with "memory" ticked: the memory benchmark (scripts/memory/README.md) on Windows, this
+  # version against master, with a 30-minute video and Parakeet. Both reports are in the run's summary and artifacts.
+  memory:
+    if: github.event_name == 'workflow_dispatch' && inputs.memory
+    runs-on: windows-latest
+    env:
+      HIGHLIGHTCUT_MODELS_DIR: ${{ github.workspace }}\models
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Cache native dependency downloads
+        uses: actions/cache@v6
+        with:
+          path: deps/.cache
+          key: deps-${{ hashFiles('scripts/deps.json') }}
+
+      - name: Fetch native dependencies
+        shell: pwsh
+        run: |
+          ./scripts/fetch-deps.ps1
+          Add-Content -LiteralPath $env:GITHUB_PATH -Value (Resolve-Path deps/win-x64).Path
+
+      - name: Cache the models
+        uses: actions/cache@v6
+        with:
+          path: models
+          key: models-${{ hashFiles('src/HighlightCut.Transcription/Models/ModelCatalog.cs') }}
+
+      - name: Download the models
+        env:
+          HIGHLIGHTCUT_NETWORK_TESTS: '1'
+        run: |
+          dotnet build tests/HighlightCut.Transcription.Tests -c Release
+          dotnet test tests/HighlightCut.Transcription.Tests -c Release --no-build --filter "FullyQualifiedName~RealDownloadTests"
+
+      - name: Measure
+        shell: pwsh
+        run: |
+          ./scripts/memory/compare.ps1 -Compare origin/master -Minutes 30
+          Get-Content artifacts/memory/before.md, artifacts/memory/after.md | Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY
+
+      - name: Upload the reports
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: memory-windows
+          path: artifacts/memory/*.md
+          if-no-files-found: ignore
 
   linux:
     runs-on: ubuntu-latest
