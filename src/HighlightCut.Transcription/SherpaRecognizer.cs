@@ -90,5 +90,10 @@ public sealed class SherpaRecognizer : ISpeechRecognizer
     /// <summary>Some words had no times from the model and were given estimated ones.</summary>
     public bool HasApproximateTimes { get; private set; }
 
-    public void Dispose() => _recognizer.Dispose();
+    /// <summary>Frees the model (a new transcription loads it again), and on Linux hands its memory back to the system.</summary>
+    public void Dispose()
+    {
+        _recognizer.Dispose();
+        NativeHeap.Trim();
+    }
 }

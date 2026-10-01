@@ -73,7 +73,22 @@ public sealed class MediaPreview : IMediaPreview, IDisposable
     private int _changePending;
     private bool _disposed;
 
-    private sealed record Thumbnail(double Time, Bitmap Color, Bitmap Grey);
+    /// <summary>A thumbnail; its greyed-out look is made the first time it is drawn (the timeline does not use it now).</summary>
+    private sealed class Thumbnail(double time, Bitmap color) : IDisposable
+    {
+        private Bitmap? _grey;
+
+        public double Time { get; } = time;
+        public Bitmap Color { get; } = color;
+        public Bitmap Grey => _grey ??= Greyed(Color);
+        public bool HasGrey => _grey is not null;
+
+        public void Dispose()
+        {
+            Color.Dispose();
+            _grey?.Dispose();
+        }
+    }
 
     public MediaPreview(MediaInfo info, MediaCache? cache)
     {
@@ -719,16 +734,14 @@ public sealed class MediaPreview : IMediaPreview, IDisposable
     private void Add(ThumbnailFrame frame, CancellationToken ct)
     {
         var color = ToBitmap(frame.Bgra, frame.Width, frame.Height);
-        var grey = ToBitmap(Desaturate(frame.Bgra, ExcludedGrey), frame.Width, frame.Height);
         lock (_lock)
         {
             if (_disposed || ct.IsCancellationRequested)
             {
                 color.Dispose();
-                grey.Dispose();
                 return;
             }
-            _thumbnails.Add(new Thumbnail(frame.Time, color, grey));
+            _thumbnails.Add(new Thumbnail(frame.Time, color));
         }
         NotifyChanged();
     }
@@ -744,6 +757,33 @@ public sealed class MediaPreview : IMediaPreview, IDisposable
         finally
         {
             handle.Free();
+        }
+    }
+
+    /// <summary>The excluded look of a thumbnail.</summary>
+    private static Bitmap Greyed(Bitmap color)
+    {
+        var size = color.PixelSize;
+        var bgra = new byte[size.Width * size.Height * 4];
+        var handle = GCHandle.Alloc(bgra, GCHandleType.Pinned);
+        try
+        {
+            color.CopyPixels(new PixelRect(size), handle.AddrOfPinnedObject(), bgra.Length, size.Width * 4);
+        }
+        finally
+        {
+            handle.Free();
+        }
+        return ToBitmap(Desaturate(bgra, ExcludedGrey), size.Width, size.Height);
+    }
+
+    /// <summary>Thumbnails whose greyed-out look has been made, for tests.</summary>
+    internal int GreyThumbnailCount
+    {
+        get
+        {
+            lock (_lock)
+                return _thumbnails.Count(t => t.HasGrey);
         }
     }
 
@@ -816,10 +856,7 @@ public sealed class MediaPreview : IMediaPreview, IDisposable
     private void DropThumbnails()
     {
         foreach (var t in _thumbnails)
-        {
-            t.Color.Dispose();
-            t.Grey.Dispose();
-        }
+            t.Dispose();
         _thumbnails.Clear();
     }
 
