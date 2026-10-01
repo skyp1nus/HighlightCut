@@ -489,6 +489,63 @@ public sealed class GpuProbeTests : IDisposable
     }
 }
 
+public class NativeHeapTests
+{
+    [Fact]
+    public void Freed_native_memory_is_handed_back_on_Linux_only()
+    {
+        Assert.Equal(OperatingSystem.IsLinux(), NativeHeap.Trim());
+    }
+}
+
+/// <summary>Runs alone: other tests loading models at the same time would blur what it measures.</summary>
+[CollectionDefinition(nameof(RecognizerMemoryTests), DisableParallelization = true)]
+public class RecognizerMemoryGroup;
+
+/// <summary>A real model's memory after it is released. Runs when HIGHLIGHTCUT_MODELS_DIR has Parakeet.</summary>
+[Collection(nameof(RecognizerMemoryTests))]
+public class RecognizerMemoryTests
+{
+    /// <summary>What the process itself uses: private bytes on Windows, resident anonymous memory on Linux.</summary>
+    private static long PrivateBytes()
+    {
+        if (OperatingSystem.IsLinux())
+        {
+            string line = File.ReadLines("/proc/self/status").First(l => l.StartsWith("RssAnon:", StringComparison.Ordinal));
+            return long.Parse(line["RssAnon:".Length..].Trim().Split(' ')[0], CultureInfo.InvariantCulture) * 1024;
+        }
+        using var process = Process.GetCurrentProcess();
+        return process.PrivateMemorySize64;
+    }
+
+    [Fact]
+    public void A_recognizer_gives_its_memory_back_when_it_is_disposed()
+    {
+        string? dir = Environment.GetEnvironmentVariable("HIGHLIGHTCUT_MODELS_DIR") is { Length: > 0 } models
+                      && new ModelStore(models).IsInstalled(ModelCatalog.Parakeet)
+            ? new ModelStore(models).DirectoryOf(ModelCatalog.Parakeet)
+            : null;
+        Assert.SkipWhen(dir is null, "Parakeet is not installed in HIGHLIGHTCUT_MODELS_DIR.");
+        float[] sample = GpuProbe.Sample(dir!);
+        long before = PrivateBytes();
+
+        long loaded;
+        using (var recognizer = new SherpaRecognizer(ModelCatalog.Parakeet, dir!))
+        {
+            Assert.NotEmpty(recognizer.Recognize(sample, 0));
+            loaded = PrivateBytes();
+        }
+        long after = PrivateBytes();
+
+        const long Mb = 1024 * 1024;
+        string numbers = $"before {before / Mb} MB, loaded {loaded / Mb} MB, disposed {after / Mb} MB";
+        TestContext.Current.TestOutputHelper?.WriteLine(numbers);
+        // The model takes hundreds of MB; what stays is the native runtime, loaded once.
+        Assert.True(loaded - before > 300 * Mb, numbers);
+        Assert.True(after - before < 150 * Mb, numbers);
+    }
+}
+
 /// <summary>
 /// Recognizes real speech with an installed model. Runs when HIGHLIGHTCUT_MODELS_DIR has the model (see
 /// RealDownloadTests); skipped otherwise.
