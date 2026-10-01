@@ -29,7 +29,7 @@ editor as they happen, each one undoable.
 ## Phase 2
 
 - **Claude via MCP** (done): Claude reads the project and edits the timeline — add, trim, split, exclude,
-  reorder and rename clips, several edits as one undo step, revert any earlier edit, move the playhead, open
+  reorder and rename clips, several edits as one undo step, revert any earlier edit, move the playhead, open and add
   videos, save the project and export it. Claude's export runs in the background: a card in the Claude panel and
   the Export button show its progress, and files are never overwritten. See [Connecting Claude](#connecting-claude).
 - **Silence and scene detection** (done): pauses (from the waveform, at a level that follows the recording's
@@ -50,6 +50,18 @@ editor as they happen, each one undoable.
   these are saved but not applied yet; each such place is marked `// STUB:` in the code.
 
 Not yet: smart cut. The UI already has a place for it.
+
+## Several videos
+
+A project can hold several videos end to end on one timeline, say a recording that stopped and started again. Add
+them with Add video… in the project menu (Ctrl+Shift+A), the + at the end of the timeline or by dropping files onto the
+timeline, and reorder or remove them in the Videos list above the clips. They play as one, and clips, keyframes,
+silences, scenes and the transcript work across all of them; each video keeps its own track volumes. The export joins
+the clips of every video into one file, or writes one file per clip: lossless when the videos match (codecs, size,
+frame rate, audio tracks), otherwise re-encoded to the first video's size and frame rate, letterboxed rather than
+stretched, with track N of each video on track N and silence where a video has fewer tracks. If lossless can't join
+them, the Export dialog says which videos differ before anything is written. Claude adds, removes and reorders videos
+too (`add_video`, `remove_video`, `move_video`) and exports them the same way.
 
 ## Connecting Claude
 
