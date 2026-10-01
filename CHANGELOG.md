@@ -11,6 +11,7 @@ starts with a short bold phrase. The same line goes into [CHANGELOG.uk.md](CHANG
 
 ### Improved
 
+- **Uses less memory.** Thumbnails on the timeline no longer keep a second, greyed-out copy that nothing showed. With every timeline chip on, a 30-minute video with its transcript now takes about 185 MB instead of 210 MB.
 - **Up-to-date video engine.** ffmpeg, which cuts and exports, moves to 9.0.2, and mpv, which plays the video, to its latest build, with their newest fixes.
 
 ## 0.1.0 — 2026-09-30 — First Cut ✂️
