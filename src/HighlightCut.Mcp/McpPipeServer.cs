@@ -57,7 +57,34 @@ public sealed class McpPipeServer(IEditorHost host, string? pipeName = null) : I
     /// when that editor exits, even if it crashes. On Unix the pipe is a socket file that a crashed editor
     /// leaves behind, so the pipe itself cannot tell whether its owner is still running.
     /// </summary>
-    public string LockPath => Path.Combine(Path.GetTempPath(), PipeName + ".lock");
+    public string LockPath => LockPathFor(PipeName);
+
+    internal static string LockPathFor(string pipeName) => Path.Combine(Path.GetTempPath(), pipeName + ".lock");
+
+    /// <summary>
+    /// Whether an editor holds <paramref name="pipeName"/>'s lock: it serves the pipe, or is about to (or still
+    /// closing). Opening the lock file for a moment fails while it is held, on Windows and on Unix alike.
+    /// </summary>
+    internal static bool IsServed(string pipeName)
+    {
+        try
+        {
+            using var probe = new FileStream(LockPathFor(pipeName), FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+            return false;
+        }
+        catch (FileNotFoundException)
+        {
+            return false;
+        }
+        catch (IOException)
+        {
+            return true;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return false;
+        }
+    }
 
     /// <summary>Written by the editor that serves the pipe with <see cref="OwnerLabel"/>, for the windows that wait.</summary>
     public string OwnerPath => Path.Combine(Path.GetTempPath(), PipeName + ".owner");

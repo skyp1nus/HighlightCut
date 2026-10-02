@@ -9,6 +9,10 @@ starts with a short bold phrase. The same line goes into [CHANGELOG.uk.md](CHANG
 
 ## Unreleased
 
+### Fixed
+
+- **Claude reconnects after a restart.** Closing and reopening HighlightCut in the middle of a chat no longer shows up as a failed tool call.
+
 ## 0.2.0 — 2026-10-02 — Stitched 🧵
 
 ### New

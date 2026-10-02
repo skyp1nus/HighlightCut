@@ -1,7 +1,9 @@
 using System.IO.Pipes;
 using System.Text.Json;
+using ModelContextProtocol;
 using ModelContextProtocol.Client;
 using ModelContextProtocol.Protocol;
+using ModelContextProtocol.Server;
 using HighlightCut.Core.Editing;
 using HighlightCut.Core.Model;
 using HighlightCut.Core.Transcripts;
@@ -1096,6 +1098,129 @@ public class McpBridgeTests
         Assert.Equal("keynote", second.GetProperty("name").GetString());
         Assert.Equal(2, launches);
         await server.DisposeAsync();
+    }
+
+    /// <summary>Serves the editor tools on one accepted pipe connection, as the editor's <see cref="McpPipeServer"/> does.</summary>
+    private static async Task ServeAsync(NamedPipeServerStream pipe, IEditorHost editor, CancellationToken cancellationToken)
+    {
+        await pipe.WaitForConnectionAsync(cancellationToken);
+        await using (var server = McpServer.Create(new StreamServerTransport(pipe, pipe, EditorTools.ServerName),
+            new McpServerOptions { ToolCollection = [.. EditorTools.Create(editor)] }))
+        {
+            try
+            {
+                await server.RunAsync(cancellationToken);
+            }
+            catch (OperationCanceledException)
+            {
+            }
+        }
+        await pipe.DisposeAsync();
+    }
+
+    private static NamedPipeServerStream Listen(string pipeName) => new(pipeName, PipeDirection.InOut,
+        NamedPipeServerStream.MaxAllowedServerInstances, PipeTransmissionMode.Byte, PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
+
+    /// <summary>Holds the pipe's lock as a running editor does, so the bridge knows not to start another.</summary>
+    private static FileStream HoldLock(string pipeName) =>
+        new(McpPipeServer.LockPathFor(pipeName), FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+
+    [Fact]
+    public async Task A_connection_dropped_during_the_handshake_is_tried_again()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        string pipeName = Connection.NewPipeName();
+        using var editor = new FakeEditor();
+        using var held = HoldLock(pipeName);
+        await using var run = new BridgeRun(new McpBridge(() => throw new InvalidOperationException("should not launch"), pipeName));
+        var client = await run.ConnectAsync();
+
+        // The editor answers a first call on its first connection.
+        using var closeFirst = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        var first = Listen(pipeName);
+        var servingFirst = ServeAsync(first, editor, closeFirst.Token);
+        Assert.Equal("keynote", (await client.Call("get_project")).Json().GetProperty("name").GetString());
+
+        // It drops that connection, then the next one in the middle of the handshake (a pipe that is going away),
+        // and answers on the one after: what a busy machine sees while HighlightCut closes and opens again.
+        var second = Listen(pipeName);
+        await closeFirst.CancelAsync();
+        await servingFirst;
+        var call = client.Call("set_label", new { clip = 1, label = "Hello" });
+        await second.WaitForConnectionAsync(ct);
+        var third = Listen(pipeName);
+        _ = ServeAsync(third, editor, ct);
+        using (var reader = new StreamReader(second, leaveOpen: true))
+            Assert.NotNull(await reader.ReadLineAsync(ct)); // The bridge's first handshake message.
+        await second.DisposeAsync();
+
+        var result = (await call).Json();
+        Assert.Equal("Hello", result.GetProperty("clips")[0].GetProperty("label").GetString());
+        Assert.Equal("Hello", editor.Session.Project.Get(1).Label);
+        Assert.Single(editor.Session.History.Entries);
+    }
+
+    [Fact]
+    public async Task A_tool_error_from_the_editor_is_not_tried_again()
+    {
+        string pipeName = Connection.NewPipeName();
+        using var editor = new FakeEditor();
+        await using var server = new McpPipeServer(editor, pipeName);
+        await server.Start().WaitAsync(TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
+        await using var run = new BridgeRun(new McpBridge(() => throw new InvalidOperationException("should not launch"), pipeName));
+        var client = await run.ConnectAsync();
+
+        var missing = await client.Call("remove_segment", new { clip = 99 });
+        Assert.True(missing.IsError);
+        Assert.Contains("Clip 99 does not exist", missing.Text(), StringComparison.Ordinal);
+        Assert.Equal(1, editor.Calls);
+    }
+
+    [Fact]
+    public async Task A_protocol_error_from_the_editor_is_not_tried_again()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        string pipeName = Connection.NewPipeName();
+        var editor = new FailingEditor(new McpProtocolException("Not now.", McpErrorCode.InvalidParams));
+        _ = ServeAsync(Listen(pipeName), editor, ct);
+        await using var run = new BridgeRun(new McpBridge(() => throw new InvalidOperationException("should not launch"), pipeName));
+        var client = await run.ConnectAsync();
+
+        var error = await Assert.ThrowsAsync<McpProtocolException>(() => client.Call("get_project"));
+        Assert.Contains("Not now.", error.Message, StringComparison.Ordinal);
+        Assert.Equal(1, editor.Calls);
+    }
+
+    [Fact]
+    public async Task An_editor_that_is_open_but_does_not_answer_is_not_started_again()
+    {
+        string pipeName = Connection.NewPipeName();
+        using var held = HoldLock(pipeName);
+        int launches = 0;
+        await using var run = new BridgeRun(new McpBridge(() =>
+        {
+            launches++;
+            return true;
+        }, pipeName, TimeSpan.FromSeconds(2)));
+        var client = await run.ConnectAsync();
+
+        var result = await client.Call("get_project");
+        Assert.True(result.IsError);
+        Assert.Contains("open but didn’t answer", result.Text(), StringComparison.Ordinal);
+        Assert.Equal(0, launches);
+    }
+
+    private sealed class FailingEditor(Exception error) : IEditorHost
+    {
+        private int _calls;
+
+        public int Calls => Volatile.Read(ref _calls);
+
+        public Task<T> RunAsync<T>(Func<IEditorContext, Task<T>> action)
+        {
+            Interlocked.Increment(ref _calls);
+            return Task.FromException<T>(error);
+        }
     }
 
     [Fact]
