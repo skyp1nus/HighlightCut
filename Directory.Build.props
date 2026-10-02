@@ -9,7 +9,7 @@
     <Authors>HighlightCut contributors</Authors>
     <Product>HighlightCut</Product>
     <!-- The one version number: the app shows it, CI builds it (with -dev.<run> between releases), tags must match it. See docs/releasing.md. -->
-    <Version>0.1.0</Version>
+    <Version>0.2.0</Version>
     <Copyright>Copyright (C) HighlightCut contributors</Copyright>
     <PackageLicenseExpression>GPL-3.0-or-later</PackageLicenseExpression>
     <InvariantGlobalization>false</InvariantGlobalization>
