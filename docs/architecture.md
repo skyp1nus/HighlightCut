@@ -419,6 +419,15 @@ Claude ──stdio──> HighlightCut.exe mcp (McpBridge) ──named pipe─�
   launch without HighlightCut popping up. The first tool call connects to the editor's pipe, starting the editor
   (`EditorLauncher`) if it is not running, and every call is forwarded as is. If the editor was closed since,
   the next call starts it again.
+- **Reconnecting.** While the editor closes or starts, a connection can drop at any point before it answers: the last
+  call's connection, a pipe that is going away, the handshake. `McpBridge.CallAsync` connects again after a short
+  pause (`RetryDelay`) until the start timeout (30 s) runs out, then says it lost the connection. Only connection
+  failures are tried again (an `IOException`, which includes `ClientTransportClosedException`, or an `McpException`
+  that is not an `McpProtocolException`); an error from the editor itself, an error result or a cancellation goes
+  back to Claude at once. A call starts the editor at most once, and never while an editor holds the pipe's lock
+  (`McpPipeServer.IsServed`): one that is starting or closing is waited for ("HighlightCut is open but didn’t answer
+  in time" if it never does). A connection is reused only while it is open, and a failed call closes only the
+  connection it used, never a newer one another call opened.
 - **The pipe server** runs in the editor while Settings → MCP server → "Let Claude connect" is on (not in `--demo`
   runs; `EditorMcpServer` stops and restarts it). The pipe is `highlightcut-mcp-<user>`, created with
   `PipeOptions.CurrentUserOnly`, so only the same user account can connect. One editor serves it: the one that

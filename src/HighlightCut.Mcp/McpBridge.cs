@@ -53,45 +53,89 @@ public sealed class McpBridge : IAsyncDisposable
     }
 
     /// <param name="caller">Who called the tool (Claude Desktop, Claude Code): the editor shows it as connected.</param>
+    /// <remarks>
+    /// While the editor closes or starts, a connection can drop at any point until it answers: on the last call's
+    /// connection, on a pipe that is going away, or during the handshake. Those are tried again until the start
+    /// timeout; an error from the editor itself (an error result or <see cref="McpProtocolException"/>) is Claude's.
+    /// </remarks>
     internal async ValueTask<CallToolResult> CallAsync(CallToolRequestParams request, Implementation? caller, CancellationToken cancellationToken)
     {
-        for (int attempt = 0; ; attempt++)
+        var call = new CallState(DateTime.UtcNow + _startTimeout);
+        while (true)
         {
-            var client = await ConnectAsync(caller, cancellationToken).ConfigureAwait(false);
+            McpClient? client = null;
             try
             {
+                client = await ConnectAsync(caller, call, cancellationToken).ConfigureAwait(false);
                 return await client.CallToolAsync(request, cancellationToken).ConfigureAwait(false);
             }
-            catch (Exception e) when (attempt == 0 && e is not OperationCanceledException and not McpException)
+            catch (Exception e) when (IsConnectionFailure(e) && !cancellationToken.IsCancellationRequested)
             {
-                // The editor was closed since the last call: connect again (starting it if needed).
-                await DisconnectAsync().ConfigureAwait(false);
+                if (client is not null)
+                    await DisconnectAsync(client).ConfigureAwait(false);
+                if (DateTime.UtcNow + RetryDelay >= call.Deadline)
+                    throw new EditorUnreachableException("Lost the connection to HighlightCut. Check that it’s open and try again.", e);
+                await Task.Delay(RetryDelay, cancellationToken).ConfigureAwait(false);
             }
         }
     }
 
-    private async Task<McpClient> ConnectAsync(Implementation? caller, CancellationToken cancellationToken)
+    /// <summary>How long a call waits before it connects again after the connection dropped.</summary>
+    internal static TimeSpan RetryDelay { get; } = TimeSpan.FromMilliseconds(250);
+
+    /// <summary>The connection broke: not the editor's answer, not a cancellation and not the bridge giving up.</summary>
+    private static bool IsConnectionFailure(Exception e) => e switch
+    {
+        EditorUnreachableException or McpProtocolException or OperationCanceledException => false,
+        // ClientTransportClosedException is an IOException; an McpException is also thrown when the transport closes.
+        IOException or McpException or ObjectDisposedException => true,
+        _ => false,
+    };
+
+    /// <summary>Returns the open connection or opens one, starting the editor at most once per call and only when it is not running.</summary>
+    private async Task<McpClient> ConnectAsync(Implementation? caller, CallState call, CancellationToken cancellationToken)
     {
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
             if (_client is { } connected)
-                return connected;
+            {
+                if (!connected.Completion.IsCompleted)
+                    return connected;
+                // The editor closed the connection since the last call.
+                await DropAsync().ConfigureAwait(false);
+            }
             var pipe = await TryConnectAsync(TimeSpan.FromMilliseconds(300), cancellationToken).ConfigureAwait(false);
             if (pipe is null)
             {
-                if (!_launchEditor())
-                    throw new McpException("HighlightCut could not be started.");
-                pipe = await TryConnectAsync(_startTimeout, cancellationToken).ConfigureAwait(false)
-                    ?? throw new McpException("HighlightCut did not start in time. Open it and try again.");
+                // A running editor (one that holds the pipe's lock) is closing or still starting: wait for it, never start another.
+                bool start = !call.Launched && !McpPipeServer.IsServed(_pipeName);
+                if (start)
+                {
+                    call.Launched = true;
+                    if (!_launchEditor())
+                        throw new EditorUnreachableException("HighlightCut could not be started.");
+                }
+                pipe = await TryConnectAsync(call.Deadline - DateTime.UtcNow, cancellationToken).ConfigureAwait(false)
+                    ?? throw new EditorUnreachableException(call.Launched
+                        ? "HighlightCut did not start in time. Open it and try again."
+                        : "HighlightCut is open but didn’t answer in time. Try again in a moment.");
             }
-            _pipe = pipe;
             // The editor is told who is really connected, not the bridge.
             var info = caller is null
                 ? new Implementation { Name = BridgeName, Version = McpEndpoint.Version }
                 : new Implementation { Name = caller.Name, Title = caller.Title, Version = caller.Version };
-            _client = await McpClient.CreateAsync(new StreamClientTransport(pipe, pipe), new McpClientOptions { ClientInfo = info },
-                cancellationToken: cancellationToken).ConfigureAwait(false);
+            try
+            {
+                _client = await McpClient.CreateAsync(new StreamClientTransport(pipe, pipe), new McpClientOptions { ClientInfo = info },
+                    cancellationToken: cancellationToken).ConfigureAwait(false);
+            }
+            catch
+            {
+                await pipe.DisposeAsync().ConfigureAwait(false);
+                throw;
+            }
+            _pipe = pipe;
             return _client;
         }
         finally
@@ -123,17 +167,14 @@ public sealed class McpBridge : IAsyncDisposable
         }
     }
 
-    private async Task DisconnectAsync()
+    /// <summary>Closes the connection if it is still <paramref name="failed"/>: another call may have opened a new one since.</summary>
+    private async Task DisconnectAsync(McpClient? failed = null)
     {
         await _gate.WaitAsync().ConfigureAwait(false);
         try
         {
-            if (_client is not null)
-                await _client.DisposeAsync().ConfigureAwait(false);
-            if (_pipe is not null)
-                await _pipe.DisposeAsync().ConfigureAwait(false);
-            _client = null;
-            _pipe = null;
+            if (failed is null || _client == failed)
+                await DropAsync().ConfigureAwait(false);
         }
         finally
         {
@@ -141,11 +182,41 @@ public sealed class McpBridge : IAsyncDisposable
         }
     }
 
+    /// <summary>Under <see cref="_gate"/>.</summary>
+    private async Task DropAsync()
+    {
+        var client = _client;
+        var pipe = _pipe;
+        _client = null;
+        _pipe = null;
+        try
+        {
+            if (client is not null)
+                await client.DisposeAsync().ConfigureAwait(false);
+        }
+        catch (Exception e) when (e is IOException or ObjectDisposedException)
+        {
+            // Closing a connection the editor already dropped.
+        }
+        if (pipe is not null)
+            await pipe.DisposeAsync().ConfigureAwait(false);
+    }
+
     public async ValueTask DisposeAsync()
     {
         await DisconnectAsync().ConfigureAwait(false);
         _gate.Dispose();
     }
+
+    /// <summary>One tool call's connection attempts: until when, and whether it started the editor.</summary>
+    private sealed class CallState(DateTime deadline)
+    {
+        public DateTime Deadline { get; } = deadline;
+        public bool Launched { get; set; }
+    }
+
+    /// <summary>The bridge gives up on the editor; Claude is shown the message.</summary>
+    private sealed class EditorUnreachableException(string message, Exception? inner = null) : McpException(message, inner);
 
     /// <summary>A tool whose definition is the editor's and whose calls go to the editor.</summary>
     private sealed class ForwardedTool(Tool tool, McpBridge bridge) : McpServerTool
